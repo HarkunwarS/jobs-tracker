@@ -1,0 +1,71 @@
+Harkunwar Singh — Software & Data Engineering Candidate
+
+PROFESSIONAL PROFILE
+Software engineering graduate and MSc Data Science student at University College Cork, Ireland.
+Practical experience across backend APIs, cloud infrastructure, full-stack web development,
+and applied machine learning. Co-authored an IEEE-published research paper on machine learning
+for crop recommendation. Eligible to work in Ireland on Stamp 2 student visa (Sep 2025 – Sep 2026).
+
+WORK EXPERIENCE
+
+GlobalLogic Technologies (Hitachi) — Engineer, Product Support — Feb 2025 to Aug 2025, Gurugram, India.
+Resolved technical support tickets daily for Adobe enterprise clients across Adobe Campaign,
+Marketo, and Commerce, diagnosing issues spanning SSL certificates, product entitlements, and
+backend database records. Investigated and corrected data integrity issues by querying backend
+databases directly, identifying and removing duplicate customer records and resolving
+entitlement mismatches. Coordinated resolution of complex multi-layer issues across internal
+engineering and QA teams using Jira for escalation tracking and Microsoft Teams for client
+communication.
+
+HashedIn by Deloitte — Engineering Trainee, HashedIn University — Mar 2024 to Jul 2024, Bengaluru.
+Selected for HashedIn University, a Deloitte-run accelerated engineering programme — independently
+learning each technology from scratch and delivering a fully working application within a 72-hour
+sprint, every week for five months. Engineered a Retrieval-Augmented Generation (RAG) application
+using LangChain, FastAPI, and GPT-3.5 enabling natural language Q&A over user-uploaded documents,
+spreadsheets, and text files by building a custom document ingestion and retrieval pipeline.
+Designed and built a full-stack Train Reservation System end-to-end with Spring Boot REST API
+backend, React/Redux frontend, PostgreSQL database, and an analytics dashboard tracking booking
+volume and revenue. Executed infrastructure tasks across Docker, AWS (EC2, S3, bastion hosts,
+VM startup scripting), Azure, and Terraform — provisioning cloud environments and containerising
+applications independently within a two-day DevOps sprint. Delivered all projects within an Agile
+framework with daily stand-ups, sprint reviews, and peer code reviews.
+
+PROJECTS
+
+Crop Yield Recommendation System — Python, scikit-learn, scikit-fuzzy, Flask, IEEE Published.
+Designed and developed an ML-based crop recommendation engine using a Fuzzy Inference System,
+trained on 10 years of real climatic and yield data spanning multiple districts in Rajasthan,
+enabling farmers to receive data-driven crop selection guidance. Sole developer responsible for
+all Python implementation: data cleaning and normalisation of a multi-year agricultural dataset,
+FIS model construction using scikit-fuzzy, and a Flask web interface. Nominated for Best Project
+Award at Manipal University Jaipur. Co-authored the research paper published and presented at an
+IEEE conference.
+
+Vehicle Speed Control — Fuzzy Inference System — Python, scikit-fuzzy.
+Designed a fuzzy logic speed controller from scratch defining linguistic input variables, a
+27-rule inference engine, and a normalised output for acceleration and braking control.
+
+EDUCATION
+University College Cork (UCC), Ireland — MSc Data Science and Analytics — Sep 2025 to Sep 2026.
+Manipal University Jaipur, India — BTech Information Technology — GPA 8.7 / 10, Minor in Data
+Science, First Class Honours equivalent — Oct 2020 to Oct 2024.
+
+TECHNICAL SKILLS
+Languages: Python, Java, JavaScript, SQL, C, C++.
+Frameworks and Libraries: Spring Boot, React, Redux, FastAPI, LangChain, Flask, Tailwind CSS,
+Material UI.
+Databases: PostgreSQL, MySQL.
+Cloud and DevOps: AWS (EC2, S3), Azure, Google Cloud Platform, Docker, Kubernetes, Terraform,
+GitHub Actions.
+Data and Machine Learning: Pandas, NumPy, scikit-learn, Fuzzy Inference Systems, data
+visualisation, statistics, Retrieval-Augmented Generation, large language model integration.
+Tools and Practices: Git, Jira, Agile and Scrum, REST APIs, Linux, technical documentation.
+
+CERTIFICATIONS
+Google Project Management Professional. Google IT Support Professional. Red Hat System
+Administration I and II (RH124 and RH134). Cisco Networking Essentials. PCAP Python (Cisco).
+Anaconda Python for Data Science. Atlassian Agile Project Management.
+
+INTERESTS
+Software engineering, data science, data engineering, machine learning, full-stack development,
+cloud infrastructure, project management, technical consulting, graduate programmes in technology.
