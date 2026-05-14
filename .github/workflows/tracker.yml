@@ -1,0 +1,60 @@
+name: Job Tracker
+
+on:
+  schedule:
+    # Hourly, 7 AM to 11 PM Irish time (Mon-Fri).
+    # Cron is UTC. Irish summer time = UTC+1, winter = UTC+0.
+    # 06:00–22:00 UTC covers both year-round.
+    - cron: "0 6-22 * * 1-5"
+    # Lighter weekend cadence — every 2 hours
+    - cron: "0 8,10,12,14,16,18,20 * * 0,6"
+  workflow_dispatch:   # lets you trigger manually from the GitHub UI
+
+jobs:
+  run-tracker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Cache CV embedding and seen-jobs
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/cv_text.embedding.npy
+            data/seen_jobs.json
+          key: job-tracker-state-${{ github.run_id }}
+          restore-keys: |
+            job-tracker-state-
+
+      - name: Run tracker
+        env:
+          EMAIL_SENDER:       ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD:     ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENT:    ${{ secrets.EMAIL_RECIPIENT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python run.py
+
+      - name: Commit updated seen-cache
+        # Persist seen_jobs.json across runs by committing it back to the repo.
+        # The cache action above is best-effort; this is the durable backup.
+        run: |
+          git config user.name  "job-tracker-bot"
+          git config user.email "bot@example.com"
+          git add data/seen_jobs.json
+          git diff --staged --quiet || git commit -m "chore: update seen-jobs cache [skip ci]"
+          git push || echo "nothing to push"
