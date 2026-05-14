@@ -1,0 +1,203 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Job Tracker v5 — User Config
+#  Edit this file to change behaviour without touching Python code.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Geographic scope ────────────────────────────────────────────────────────
+# Jobs matching ANY of these location filters will be kept.
+locations:
+  ireland: true            # Cork, Dublin, Galway, Limerick, Waterford, etc.
+  eu_remote: true          # "Remote — EU" / "Remote — Europe"
+  remote_anywhere: true    # Fully remote, any country
+  visa_sponsoring: true    # Match on visa-sponsor keywords (UK, Germany, NL, etc.)
+
+# Countries other than Ireland/India we'll accept if visa_sponsoring is on.
+# These all routinely sponsor non-EU workers for tech roles.
+visa_sponsor_countries:
+  - united kingdom
+  - uk
+  - england
+  - scotland
+  - germany
+  - netherlands
+  - amsterdam
+  - berlin
+  - munich
+  - london
+  - manchester
+  - edinburgh
+  - poland
+  - spain
+  - portugal
+  - france
+  - sweden
+  - denmark
+  - finland
+  - norway
+  - belgium
+  - luxembourg
+  - switzerland
+  - austria
+
+# ── Role categories ─────────────────────────────────────────────────────────
+# Each category has a list of keywords matched against the job TITLE.
+# Adding "data analyst" here means any title containing those two words.
+role_categories:
+
+  software_engineering:
+    enabled: true
+    keywords:
+      - software engineer
+      - software developer
+      - backend engineer
+      - backend developer
+      - frontend engineer
+      - frontend developer
+      - fullstack
+      - full stack
+      - full-stack
+      - web developer
+      - application engineer
+      - application developer
+      - platform engineer
+      - api developer
+      - mobile developer
+      - ios developer
+      - android developer
+      - python developer
+      - java developer
+      - javascript developer
+      - .net developer
+      - dotnet developer
+      - software graduate
+      - associate software
+      - junior software
+
+  data_science:
+    enabled: true
+    keywords:
+      - data scientist
+      - data science
+      - applied scientist
+      - research scientist
+      - machine learning
+      - ml engineer
+      - ai engineer
+      - ai/ml
+      - mlops
+      - nlp engineer
+      - computer vision
+
+  data_engineering:
+    enabled: true
+    keywords:
+      - data engineer
+      - analytics engineer
+      - data platform
+      - data infrastructure
+      - etl developer
+      - bi developer
+      - business intelligence
+      - data analyst
+      - analytics analyst
+
+  devops_cloud:
+    enabled: true
+    keywords:
+      - devops
+      - sre
+      - site reliability
+      - cloud engineer
+      - cloud architect
+      - platform engineer
+      - infrastructure engineer
+      - aws engineer
+      - azure engineer
+      - kubernetes
+
+  project_management:
+    enabled: true
+    keywords:
+      - project manager
+      - project coordinator
+      - programme manager
+      - program manager
+      - technical project
+      - delivery manager
+      - scrum master
+      - product manager
+      - product owner
+
+  other_relevant:
+    enabled: true
+    keywords:
+      - graduate programme
+      - graduate program
+      - graduate scheme
+      - graduate developer
+      - graduate engineer
+      - graduate analyst
+      - associate consultant
+      - associate engineer
+      - technical consultant
+      - solutions engineer
+      - business analyst
+      - systems analyst
+      - qa engineer
+      - quality assurance
+      - test engineer
+      - cybersecurity analyst
+      - security analyst
+      - automation engineer
+
+# ── Seniority filter ────────────────────────────────────────────────────────
+# We REJECT jobs whose title contains these (case-insensitive whole-word).
+# Note: "lead" and "manager" alone are NOT here because some grad programmes
+# include them legitimately (e.g. "Team Lead - Graduate", "Project Manager
+# Graduate Programme"). They're soft-flagged instead via the matcher.
+reject_if_title_contains:
+  - senior
+  - sr.
+  - staff engineer
+  - staff software
+  - staff data
+  - principal
+  - director
+  - vp
+  - vice president
+  - head of
+  - chief
+  - distinguished
+  - 5+ years
+  - 7+ years
+  - 10+ years
+  - "experienced "
+
+# Strong seniority signals (always reject) — multi-word phrases only,
+# avoids the false positives from substring matching
+reject_phrases:
+  - "senior software"
+  - "senior data"
+  - "senior engineer"
+  - "senior developer"
+  - "engineering manager"
+  - "lead engineer"
+  - "lead developer"
+  - "lead data"
+
+# ── Relevance scoring ───────────────────────────────────────────────────────
+# Top tier = WhatsApp/Telegram instant alert. Everything else = email digest.
+scoring:
+  telegram_threshold: 0.55     # cosine similarity threshold (0-1, lower = more matches)
+  max_telegram_per_run: 5      # cap on instant alerts per hourly run
+  cv_text_file: "data/cv_text.txt"   # plain text version of your CV for embedding
+
+# ── Notification routing ────────────────────────────────────────────────────
+notifications:
+  email:
+    enabled: true
+    daily_digest_hour: 8        # 24h, when to send the daily summary (Irish time)
+    instant_runs: true          # also send each hourly batch as email
+  telegram:
+    enabled: true
+    only_above_threshold: true  # only send Telegram for high-relevance jobs

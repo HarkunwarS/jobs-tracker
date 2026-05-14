@@ -1,0 +1,207 @@
+# ════════════════════════════════════════════════════════════════════════════
+#  Job Tracker v5 — Curated Company List
+#  Hand-verified Ireland-relevant employers, organised by ATS.
+#
+#  Add companies here. The bot probes each ATS endpoint, so a wrong slug
+#  just fails silently (logged as a warning) — it won't break the run.
+#
+#  How to find a company's ATS slug:
+#    Greenhouse:  https://boards.greenhouse.io/<slug>
+#    Lever:       https://jobs.lever.co/<slug>
+#    Ashby:       https://jobs.ashbyhq.com/<slug>
+#    Workable:    https://apply.workable.com/<slug>/
+#    SmartRec:    https://jobs.smartrecruiters.com/<slug>
+#    Personio:    https://<slug>.jobs.personio.de/
+#    Workday:     varies — see workday_tenants section
+#
+#  Most companies tell you the slug just by visiting their careers page
+#  and copying it from the URL.
+# ════════════════════════════════════════════════════════════════════════════
+
+# ── Greenhouse ──────────────────────────────────────────────────────────────
+# Most US tech companies with Irish offices use Greenhouse.
+greenhouse:
+  # Tech with significant Irish presence
+  Cloudflare: cloudflare
+  Workhuman: workhuman
+  Intercom: intercom
+  HubSpot: hubspot
+  MongoDB: mongodb
+  Tines: tines
+  Teamwork: teamwork
+  Indeed: indeed
+  Arctic Wolf: arcticwolf
+  Shopify: shopify
+  Zendesk: zendesk
+  Twilio: twilio
+  Figma: figma
+  Notion: notion
+  Canva: canva
+  Asana: asana
+  Airtable: airtable
+  Webflow: webflow
+  Loom: loom
+  Miro: miro
+  Typeform: typeform
+  Personio: personio
+  Phorest: phorest
+  Fenergo: fenergo
+  Wayflyer: wayflyer
+  Datadog: datadog
+  HashiCorp: hashicorp
+  Grafana Labs: grafanalabs
+  PagerDuty: pagerduty
+  New Relic: newrelic
+  Snyk: snyk
+  Sysdig: sysdig
+  Recorded Future: recordedfuture
+  Rapid7: rapid7
+  Tenable: tenable
+  Scale AI: scaleai
+  Weights & Biases: wandb
+  Hugging Face: huggingface
+  Cohere: cohere
+  Celonis: celonis
+  ICON plc: iconplc
+  Vaultree: vaultree
+  Version 1: version1
+  Learnosity: learnosity
+  Cubic Telecom: cubictelecom
+  Kitman Labs: kitmanlabs
+  ServiceNow: servicenow
+  Workiva: workiva
+
+  # AI / ML companies that hire remotely or sponsor
+  Anthropic: anthropic
+  OpenAI: openai
+  Mistral AI: mistralai
+  Character AI: characterai
+  Perplexity: perplexity
+  Glean: glean
+  Adept: adeptailabs
+  Pinecone: pinecone
+
+  # FinTech with EU/Irish presence
+  Plaid: plaid
+  Mercury: mercury
+  Ramp: ramp
+  Modulr: modulr
+
+  # More Ireland-headquartered or Ireland-based
+  Letsgetchecked: letsgetchecked
+  Tymit: tymit
+  Allica Bank: allicabank
+
+# ── Lever ───────────────────────────────────────────────────────────────────
+lever:
+  Stripe: stripe
+  Revolut: revolut
+  SAP: sap
+  Dropbox: dropbox
+  Reddit: reddit
+  Squarespace: squarespace
+  Netlify: netlify
+  Klarna: klarna
+  Wise: wise
+  Brex: brex
+  Checkout.com: checkout
+  Deel: deel
+  Remote: remote
+  Lattice: lattice
+  Culture Amp: cultureamp
+  Contentful: contentful
+  Lokalise: lokalise
+  DigitalOcean: digitalocean
+  Fastly: fastly
+  Aiven: aiven
+  Workvivo: workvivo
+  Evervault: evervault
+  Hopin: hopin
+  Octopus Energy: octoenergy
+  N26: n26
+  Bitpanda: bitpanda
+  Trade Republic: traderepublic
+
+# ── Ashby ───────────────────────────────────────────────────────────────────
+# Increasingly popular with YC-backed companies. Slugs are usually clean.
+ashby:
+  Linear: linear
+  Vercel: vercel
+  Ramp: ramp
+  Replit: replit
+  Modal: modal
+  Cursor: cursor
+  Posthog: posthog
+  Supabase: supabase
+  Resend: resend
+  Clerk: clerk
+  Sentry: sentry
+  Browserbase: browserbase
+
+# ── Workable ────────────────────────────────────────────────────────────────
+# Huge in Irish SMEs and EU startups. Slugs usually = lowercase company name.
+workable:
+  Logitech: logitech
+  Voxpro: voxpro
+  AMCS Group: amcs
+  Glofox: glofox
+  Soldo: soldo
+  Mews: mews
+
+# ── SmartRecruiters ─────────────────────────────────────────────────────────
+# Slug examples — many Irish offices use this.
+smartrecruiters:
+  Bosch Group: BoschGroup
+  Allianz: Allianz1
+  Hitachi: Hitachi1
+  Equinix: Equinix1
+  Ingersoll Rand: IngersollRand2
+  Visa: VisaInc
+
+# ── Personio ────────────────────────────────────────────────────────────────
+personio: {}  # populated by discovery engine
+
+# ── Workday ─────────────────────────────────────────────────────────────────
+# Workday is per-tenant — each company has its own subdomain. The bot calls
+# https://<tenant>.wd<N>.myworkdayjobs.com/<external_path>/jobs to fetch jobs.
+# Format:  CompanyName: [tenant, wd_number, external_path]
+# Find these by going to a company's careers page and copying from the URL.
+workday_tenants:
+  Accenture:         [accenture,        3, Accenture_Careers]
+  Microsoft:         [microsoft,        1, Microsoft]
+  Salesforce:        [salesforce,       1, External_Career_Site]
+  Workday Inc.:      [workday,          5, Workday]
+  AIB:               [aib,              3, AIB_External_Careers]
+  Bank of Ireland:   [boi,              3, BOI_Careers]
+  Aviva:             [aviva,            3, External]
+  Aer Lingus:        [aerlingus,        3, External]
+  Ryanair:           [ryanair,          3, External]
+  Glanbia:           [glanbia,          3, External]
+  ESB:               [esb,              3, ESB]
+  Kerry Group:       [kerry,            3, External]
+  Pfizer:            [pfizer,           3, PfizerCareers]
+  J&J:               [jnj,              3, jnjcareers]
+  MSD:               [merck,            3, SearchJobs]
+  Medtronic:         [medtronic,        5, External]
+  Boston Scientific: [bostonscientific, 3, External]
+  Stryker:           [stryker,          1, Stryker_Careers]
+  Abbvie:            [abbvie,           5, External]
+  EY:                [ey,               3, EY_Careers]
+  Deloitte:          [deloitte,         3, Deloitte_Careers]
+  KPMG:              [kpmg,             3, KPMG_Careers]
+  PwC:               [pwc,              3, Global_Experienced_Careers]
+  Mastercard:        [mastercard,       1, CorporateCareers]
+
+# ── Direct grad programme pages ─────────────────────────────────────────────
+# These don't fit any standard ATS — we just check the page for changes.
+# (Implemented in sources/direct.py — included for visibility.)
+direct_grad_pages:
+  Google Ireland:    https://www.google.com/about/careers/applications/jobs/results/?location=Ireland
+  Meta Ireland:      https://www.metacareers.com/jobs?offices[0]=Dublin%2C%20Ireland
+  Apple Ireland:     https://jobs.apple.com/en-ie/search?location=ireland-IRLD
+  Amazon Ireland:    https://www.amazon.jobs/en/locations/ireland
+  LinkedIn Ireland:  https://careers.linkedin.com/jobs?country=Ireland
+  Intel Ireland:     https://jobs.intel.com/en/search-jobs/Ireland
+  Analog Devices:    https://careers.analog.com/jobs?country=Ireland
+  Bank of America:   https://careers.bankofamerica.com/en-us/job-search?locationCountry=ireland
+  Citi:              https://jobs.citi.com/search-jobs/Ireland
