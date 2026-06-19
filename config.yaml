@@ -1,19 +1,17 @@
 # ════════════════════════════════════════════════════════════════════════════
 #  Job Tracker v5 — User Config
-#  Edit this file to change behaviour without touching Python code.
 # ════════════════════════════════════════════════════════════════════════════
 
 # ── Geographic scope ────────────────────────────────────────────────────────
-# Jobs matching ANY of these location filters will be kept.
 locations:
   ireland: true            # Cork, Dublin, Galway, Limerick, Waterford, etc.
   eu_remote: true          # "Remote — EU" / "Remote — Europe"
   remote_anywhere: true    # Fully remote, any country
-  visa_sponsoring: true    # Match on visa-sponsor keywords (UK, Germany, NL, etc.)
+  visa_sponsoring: true    # Non-Ireland locations — ONLY kept if description
+                           # explicitly mentions visa sponsorship (see filters.py)
 
-# Countries other than Ireland/India we'll accept if visa_sponsoring is on.
-# These all routinely sponsor non-EU workers for tech roles.
-visa_sponsor_countries:
+# Europe: countries that regularly sponsor non-EU tech workers
+visa_sponsor_countries_europe:
   - united kingdom
   - uk
   - england
@@ -39,9 +37,64 @@ visa_sponsor_countries:
   - switzerland
   - austria
 
+# Asia: target countries — Singapore, Malaysia, Japan, South Korea, etc.
+visa_sponsor_countries_asia:
+  - singapore
+  - malaysia
+  - kuala lumpur
+  - japan
+  - tokyo
+  - osaka
+  - south korea
+  - korea
+  - seoul
+  - hong kong
+  - taiwan
+  - taipei
+  - thailand
+  - bangkok
+  - vietnam
+  - ho chi minh
+  - hanoi
+  - indonesia
+  - jakarta
+  - philippines
+  - manila
+  - dubai
+  - abu dhabi
+  - uae
+  - united arab emirates
+
+# ── Visa sponsorship detection ───────────────────────────────────────────────
+# Jobs outside Ireland are ONLY included if their description contains
+# at least one of these phrases. This prevents the tracker from sending
+# you jobs where the company has no intention of sponsoring you.
+visa_sponsorship_phrases:
+  - "visa sponsorship"
+  - "we sponsor"
+  - "will sponsor"
+  - "sponsorship provided"
+  - "visa support"
+  - "work permit"
+  - "relocation support"
+  - "relocation assistance"
+  - "relocation package"
+  - "right to work not required"
+  - "right to work is not required"
+  - "no right to work required"
+  - "open to relocation"
+  - "we welcome applicants"
+  - "sponsorship available"
+  - "sponsor the right candidate"
+  - "global mobility"
+  - "employment pass"        # Singapore-specific
+  - "ep application"         # Singapore EP
+  - "work visa"
+  - "work authorisation"
+  - "work authorization"
+  - "immigration support"
+
 # ── Role categories ─────────────────────────────────────────────────────────
-# Each category has a list of keywords matched against the job TITLE.
-# Adding "data analyst" here means any title containing those two words.
 role_categories:
 
   software_engineering:
@@ -151,10 +204,6 @@ role_categories:
       - automation engineer
 
 # ── Seniority filter ────────────────────────────────────────────────────────
-# We REJECT jobs whose title contains these (case-insensitive whole-word).
-# Note: "lead" and "manager" alone are NOT here because some grad programmes
-# include them legitimately (e.g. "Team Lead - Graduate", "Project Manager
-# Graduate Programme"). They're soft-flagged instead via the matcher.
 reject_if_title_contains:
   - senior
   - sr.
@@ -173,8 +222,6 @@ reject_if_title_contains:
   - 10+ years
   - "experienced "
 
-# Strong seniority signals (always reject) — multi-word phrases only,
-# avoids the false positives from substring matching
 reject_phrases:
   - "senior software"
   - "senior data"
@@ -186,18 +233,17 @@ reject_phrases:
   - "lead data"
 
 # ── Relevance scoring ───────────────────────────────────────────────────────
-# Top tier = WhatsApp/Telegram instant alert. Everything else = email digest.
 scoring:
-  telegram_threshold: 0.48     # cosine similarity threshold (0-1, lower = more matches)
-  max_telegram_per_run: 10      # cap on instant alerts per hourly run
-  cv_text_file: "data/cv_text.txt"   # plain text version of your CV for embedding
+  telegram_threshold: 0.48
+  max_telegram_per_run: 10
+  cv_text_file: "data/cv_text.txt"
 
 # ── Notification routing ────────────────────────────────────────────────────
 notifications:
   email:
     enabled: true
-    daily_digest_hour: 8        # 24h, when to send the daily summary (Irish time)
-    instant_runs: true          # also send each hourly batch as email
+    daily_digest_hour: 8
+    instant_runs: true
   telegram:
     enabled: true
-    only_above_threshold: true  # only send Telegram for high-relevance jobs
+    only_above_threshold: true
