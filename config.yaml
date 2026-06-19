@@ -188,8 +188,8 @@ reject_phrases:
 # ── Relevance scoring ───────────────────────────────────────────────────────
 # Top tier = WhatsApp/Telegram instant alert. Everything else = email digest.
 scoring:
-  telegram_threshold: 0.55     # cosine similarity threshold (0-1, lower = more matches)
-  max_telegram_per_run: 5      # cap on instant alerts per hourly run
+  telegram_threshold: 0.48     # cosine similarity threshold (0-1, lower = more matches)
+  max_telegram_per_run: 10      # cap on instant alerts per hourly run
   cv_text_file: "data/cv_text.txt"   # plain text version of your CV for embedding
 
 # ── Notification routing ────────────────────────────────────────────────────
