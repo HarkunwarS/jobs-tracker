@@ -91,7 +91,8 @@ def filter_jobs(raw_jobs: List[Dict], cfg: Dict) -> List[Dict]:
             counters["no_role_match"] += 1
             continue
 
-        scope = is_in_scope(location, title, cfg)
+        description = j.get("description", "")
+        scope = is_in_scope(location, title, description, cfg)
         if scope is None:
             counters["out_of_scope"] += 1
             continue
@@ -138,6 +139,9 @@ def linkedin_locations(cfg: Dict) -> List[str]:
         locs.append("Ireland")
     if scope.get("eu_remote", True) or scope.get("visa_sponsoring", True):
         locs.extend(["United Kingdom", "Germany", "Netherlands"])
+    if scope.get("visa_sponsoring", True):
+        # Asia targets
+        locs.extend(["Singapore", "Malaysia", "Japan", "South Korea", "Hong Kong"])
     if scope.get("remote_anywhere", True):
         locs.append("Remote")
     return locs
