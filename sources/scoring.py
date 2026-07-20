@@ -62,16 +62,24 @@ def get_cv_embedding(cv_path: str) -> np.ndarray:
     if not cv_path_obj.exists():
         raise FileNotFoundError(f"CV text file not found at {cv_path}")
 
-    cv_text = cv_path_obj.read_text(encoding="utf-8")
+    try:
+        cv_text = cv_path_obj.read_text(encoding="utf-8")
+    except Exception as e:
+        raise IOError(f"Failed to read CV file {cv_path}: {e}")
+
+    if not cv_text.strip():
+        raise ValueError(f"CV file {cv_path} is empty")
+
     digest = hashlib.sha256(cv_text.encode("utf-8")).hexdigest()[:16]
     cache_path = cv_path_obj.with_stem(f"{cv_path_obj.stem}.{digest}").with_suffix(".npy")
 
     if cache_path.exists():
         try:
             _cv_embedding = np.load(cache_path)
+            print(f"  ✓ CV embedding loaded from cache")
             return _cv_embedding
         except Exception as e:
-            print(f"  ⚠️  Failed to load CV cache: {e}")
+            print(f"  ⚠️  Failed to load cached embedding: {e}, re-encoding…")
 
     # Clean stale hash caches, then encode fresh
     for old in cv_path_obj.parent.glob(f"{cv_path_obj.stem}.*.npy"):
@@ -80,13 +88,18 @@ def get_cv_embedding(cv_path: str) -> np.ndarray:
         except Exception as e:
             print(f"  ⚠️  Failed to clean cache {old}: {e}")
 
-    _cv_embedding = _load_model().encode(cv_text, normalize_embeddings=True)
+    try:
+        print(f"  📝 Encoding CV text ({len(cv_text)} chars)…")
+        _cv_embedding = _load_model().encode(cv_text, normalize_embeddings=True)
+    except Exception as e:
+        raise RuntimeError(f"Failed to encode CV with model: {e}")
 
     # Try to save cache, but don't fail if we can't
     try:
         np.save(cache_path, _cv_embedding)
+        print(f"  ✓ CV embedding cached")
     except Exception as e:
-        print(f"  ⚠️  Failed to save CV cache to {cache_path}: {e}")
+        print(f"  ⚠️  Failed to save CV cache: {e} (continuing without cache)")
 
     return _cv_embedding
 
@@ -105,7 +118,11 @@ def score_jobs(jobs: List[Dict], cv_path: str) -> List[Dict]:
     if not jobs:
         return jobs
 
-    cv_vec = get_cv_embedding(cv_path)
+    try:
+        cv_vec = get_cv_embedding(cv_path)
+    except Exception as e:
+        raise RuntimeError(f"Failed to get CV embedding: {e}")
+
     model = _load_model()
 
     texts = []
@@ -118,10 +135,14 @@ def score_jobs(jobs: List[Dict], cv_path: str) -> List[Dict]:
             text += f" {j['description'][:1000]}"
         texts.append(text)
 
-    vecs = model.encode(texts, normalize_embeddings=True, batch_size=32)
-    # Ensure cv_vec is 1D for proper matrix multiplication
-    cv_vec = np.squeeze(cv_vec)
-    cosines = (vecs @ cv_vec).tolist()
+    try:
+        print(f"  🔄 Encoding {len(texts)} job descriptions…")
+        vecs = model.encode(texts, normalize_embeddings=True, batch_size=32)
+        # Ensure cv_vec is 1D for proper matrix multiplication
+        cv_vec = np.squeeze(cv_vec)
+        cosines = (vecs @ cv_vec).tolist()
+    except Exception as e:
+        raise RuntimeError(f"Failed to encode jobs or compute similarities: {e}")
 
     for job, cosine in zip(jobs, cosines):
         boost = _keyword_boost(job.get("title", ""))
@@ -130,6 +151,7 @@ def score_jobs(jobs: List[Dict], cv_path: str) -> List[Dict]:
         job["score"] = round(float(cosine) + boost, 4)
 
     jobs.sort(key=lambda j: j["score"], reverse=True)
+    print(f"  ✓ Scored {len(jobs)} jobs")
     return jobs
 
 
