@@ -64,17 +64,30 @@ def get_cv_embedding(cv_path: str) -> np.ndarray:
 
     cv_text = cv_path_obj.read_text(encoding="utf-8")
     digest = hashlib.sha256(cv_text.encode("utf-8")).hexdigest()[:16]
-    cache_path = cv_path_obj.with_suffix(f".{digest}.npy")
+    cache_path = cv_path_obj.with_stem(f"{cv_path_obj.stem}.{digest}").with_suffix(".npy")
 
     if cache_path.exists():
-        _cv_embedding = np.load(cache_path)
-        return _cv_embedding
+        try:
+            _cv_embedding = np.load(cache_path)
+            return _cv_embedding
+        except Exception as e:
+            print(f"  ⚠️  Failed to load CV cache: {e}")
 
     # Clean stale hash caches, then encode fresh
     for old in cv_path_obj.parent.glob(f"{cv_path_obj.stem}.*.npy"):
-        old.unlink(missing_ok=True)
+        try:
+            old.unlink(missing_ok=True)
+        except Exception as e:
+            print(f"  ⚠️  Failed to clean cache {old}: {e}")
+
     _cv_embedding = _load_model().encode(cv_text, normalize_embeddings=True)
-    np.save(cache_path, _cv_embedding)
+
+    # Try to save cache, but don't fail if we can't
+    try:
+        np.save(cache_path, _cv_embedding)
+    except Exception as e:
+        print(f"  ⚠️  Failed to save CV cache to {cache_path}: {e}")
+
     return _cv_embedding
 
 
