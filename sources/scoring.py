@@ -47,12 +47,8 @@ MAX_BOOST = 0.12
 def _load_model():
     global _model
     if _model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            _model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
-        except Exception as e:
-            print(f"  ⚠️  Failed to load sentence-transformers model: {e}")
-            raise
+        from sentence_transformers import SentenceTransformer
+        _model = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")
     return _model
 
 
@@ -66,35 +62,19 @@ def get_cv_embedding(cv_path: str) -> np.ndarray:
     if not cv_path_obj.exists():
         raise FileNotFoundError(f"CV text file not found at {cv_path}")
 
-    try:
-        cv_text = cv_path_obj.read_text(encoding="utf-8")
-    except Exception as e:
-        raise IOError(f"Failed to read CV file {cv_path}: {e}")
-
+    cv_text = cv_path_obj.read_text(encoding="utf-8")
     digest = hashlib.sha256(cv_text.encode("utf-8")).hexdigest()[:16]
     cache_path = cv_path_obj.with_suffix(f".{digest}.npy")
 
     if cache_path.exists():
-        try:
-            _cv_embedding = np.load(cache_path)
-            return _cv_embedding
-        except Exception as e:
-            print(f"  ⚠️  Failed to load cached embedding: {e}. Regenerating...")
+        _cv_embedding = np.load(cache_path)
+        return _cv_embedding
 
     # Clean stale hash caches, then encode fresh
     for old in cv_path_obj.parent.glob(f"{cv_path_obj.stem}.*.npy"):
-        try:
-            old.unlink(missing_ok=True)
-        except Exception as e:
-            print(f"  ⚠️  Failed to clean old cache {old}: {e}")
-
-    try:
-        _cv_embedding = _load_model().encode(cv_text, normalize_embeddings=True)
-        np.save(cache_path, _cv_embedding)
-    except Exception as e:
-        print(f"  ❌ Embedding generation failed: {e}")
-        raise
-
+        old.unlink(missing_ok=True)
+    _cv_embedding = _load_model().encode(cv_text, normalize_embeddings=True)
+    np.save(cache_path, _cv_embedding)
     return _cv_embedding
 
 
