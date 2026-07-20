@@ -93,6 +93,15 @@ greenhouse:
   Allica Bank: allicabank
 
 # ── Lever ───────────────────────────────────────────────────────────────────
+  # ── Added v6 (verify in first run logs; a wrong slug just yields 0 jobs)
+  Stripe: stripe
+  Datadog: datadog
+  Elastic: elastic
+  GitLab: gitlab
+  HashiCorp: hashicorp
+  Squarespace: squarespace
+  Udemy: udemy
+
 lever:
   Stripe: stripe
   Revolut: revolut
@@ -195,13 +204,14 @@ workday_tenants:
 # ── Direct grad programme pages ─────────────────────────────────────────────
 # These don't fit any standard ATS — we just check the page for changes.
 # (Implemented in sources/direct.py — included for visibility.)
-direct_grad_pages:
-  Google Ireland:    https://www.google.com/about/careers/applications/jobs/results/?location=Ireland
-  Meta Ireland:      https://www.metacareers.com/jobs?offices[0]=Dublin%2C%20Ireland
-  Apple Ireland:     https://jobs.apple.com/en-ie/search?location=ireland-IRLD
-  Amazon Ireland:    https://www.amazon.jobs/en/locations/ireland
-  LinkedIn Ireland:  https://careers.linkedin.com/jobs?country=Ireland
-  Intel Ireland:     https://jobs.intel.com/en/search-jobs/Ireland
-  Analog Devices:    https://careers.analog.com/jobs?country=Ireland
-  Bank of America:   https://careers.bankofamerica.com/en-us/job-search?locationCountry=ireland
-  Citi:              https://jobs.citi.com/search-jobs/Ireland
+
+# ── Jibe / iCIMS career sites (NEW v6) ──────────────────────────────────────
+# Custom career sites built on Jibe expose JSON at https://<host>/api/jobs
+# This is what Susquehanna (SIG) uses — the job you found manually.
+jibe:
+  Susquehanna (SIG): careers.sig.com
+
+# NOTE (v6): `direct_grad_pages` from v5 had no fetcher and was silently
+# ignored — removed. If you want a company with no public ATS endpoint,
+# check whether their careers site is Jibe-powered (view-source and look
+# for jibecdn.com), else rely on the LinkedIn/Jooble sweeps to catch them.

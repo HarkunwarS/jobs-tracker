@@ -1,29 +1,34 @@
 # ════════════════════════════════════════════════════════════════════════════
-#  Job Tracker v5 — User Config
+#  Job Tracker v6 — User Config
+#
+#  Philosophy change vs v5: there is NO role allowlist anymore. The tracker
+#  rejects clearly-senior roles and clearly-irrelevant sectors (see
+#  sources/filters.py), keeps every other early-career job in scope, and
+#  lets the CV-similarity score rank them. Broaden/narrow by editing the
+#  reject patterns in filters.py, not by adding keywords here.
 # ════════════════════════════════════════════════════════════════════════════
 
 # ── Geographic scope ────────────────────────────────────────────────────────
 locations:
-  ireland: true            # Cork, Dublin, Galway, Limerick, Waterford, etc.
-  eu_remote: true          # "Remote — EU" / "Remote — Europe"
-  remote_anywhere: true    # Fully remote, any country
-  visa_sponsoring: true    # Non-Ireland locations — ONLY kept if description
-                           # explicitly mentions visa sponsorship (see filters.py)
+  ireland: true            # always in scope, no sponsorship check
+  eu_remote: true
+  remote_anywhere: true
+  visa_sponsoring: true    # non-Ireland: needs sponsorship evidence
+                           # (description phrase OR source flag like Arbeitnow)
 
-# Europe: countries that regularly sponsor non-EU tech workers
 visa_sponsor_countries_europe:
   - united kingdom
   - uk
   - england
   - scotland
-  - germany
-  - netherlands
-  - amsterdam
-  - berlin
-  - munich
   - london
   - manchester
   - edinburgh
+  - germany
+  - berlin
+  - munich
+  - netherlands
+  - amsterdam
   - poland
   - spain
   - portugal
@@ -37,7 +42,6 @@ visa_sponsor_countries_europe:
   - switzerland
   - austria
 
-# Asia: target countries — Singapore, Malaysia, Japan, South Korea, etc.
 visa_sponsor_countries_asia:
   - singapore
   - malaysia
@@ -46,7 +50,6 @@ visa_sponsor_countries_asia:
   - tokyo
   - osaka
   - south korea
-  - korea
   - seoul
   - hong kong
   - taiwan
@@ -54,8 +57,6 @@ visa_sponsor_countries_asia:
   - thailand
   - bangkok
   - vietnam
-  - ho chi minh
-  - hanoi
   - indonesia
   - jakarta
   - philippines
@@ -65,15 +66,13 @@ visa_sponsor_countries_asia:
   - uae
   - united arab emirates
 
-# ── Visa sponsorship detection ───────────────────────────────────────────────
-# Jobs outside Ireland are ONLY included if their description contains
-# at least one of these phrases. This prevents the tracker from sending
-# you jobs where the company has no intention of sponsoring you.
 visa_sponsorship_phrases:
   - "visa sponsorship"
   - "we sponsor"
   - "will sponsor"
   - "sponsorship provided"
+  - "sponsorship available"
+  - "sponsor the right candidate"
   - "visa support"
   - "work permit"
   - "relocation support"
@@ -83,167 +82,98 @@ visa_sponsorship_phrases:
   - "right to work is not required"
   - "no right to work required"
   - "open to relocation"
-  - "we welcome applicants"
-  - "sponsorship available"
-  - "sponsor the right candidate"
   - "global mobility"
-  - "employment pass"        # Singapore-specific
-  - "ep application"         # Singapore EP
+  - "employment pass"
+  - "ep application"
   - "work visa"
   - "work authorisation"
   - "work authorization"
   - "immigration support"
+  - "skilled worker visa"
+  - "tier 2"
 
-# ── Role categories ─────────────────────────────────────────────────────────
-role_categories:
+# ── Filtering ───────────────────────────────────────────────────────────────
+filtering:
+  # Keep jobs whose title carries no seniority signal at all (many genuine
+  # entry-level jobs are just "Data Analyst"). Scoring ranks them.
+  include_unspecified_seniority: true
 
-  software_engineering:
-    enabled: true
-    keywords:
-      - software engineer
-      - software developer
-      - backend engineer
-      - backend developer
-      - frontend engineer
-      - frontend developer
-      - fullstack
-      - full stack
-      - full-stack
-      - web developer
-      - application engineer
-      - application developer
-      - platform engineer
-      - api developer
-      - mobile developer
-      - ios developer
-      - android developer
-      - python developer
-      - java developer
-      - javascript developer
-      - .net developer
-      - dotnet developer
-      - software graduate
-      - associate software
-      - junior software
+# ── Keywords (for SEARCH-based sources only — not a filter) ────────────────
+keywords:
+  # LinkedIn Ireland sweep — broad on purpose
+  linkedin_ireland:
+    - graduate
+    - graduate programme
+    - junior
+    - intern
+    - software engineer
+    - data analyst
+    - data scientist
+    - data engineer
+    - machine learning
+    - business analyst
+    - supply chain
+    - project manager
+    - ai trainer
+    - devops
+  # Short list for abroad locations (visa gate applies there)
+  linkedin_abroad:
+    - graduate programme visa sponsorship
+    - software engineer visa sponsorship
+    - data analyst visa sponsorship
+  # Queries for Jooble (Ireland) and Adzuna (abroad)
+  aggregator_queries:
+    - graduate
+    - junior
+    - data analyst
+    - software engineer
+    - business analyst
+    - supply chain graduate
+    - project coordinator
 
-  data_science:
-    enabled: true
-    keywords:
-      - data scientist
-      - data science
-      - applied scientist
-      - research scientist
-      - machine learning
-      - ml engineer
-      - ai engineer
-      - ai/ml
-      - mlops
-      - nlp engineer
-      - computer vision
+linkedin:
+  window_hours: 3          # search window; > run cadence so gaps can't open
+  detail_fetch_cap: 15     # max description fetches per run (visa candidates)
+  abroad_locations:
+    - United Kingdom
+    - Germany
+    - Netherlands
+    - Singapore
+    - United Arab Emirates
 
-  data_engineering:
-    enabled: true
-    keywords:
-      - data engineer
-      - analytics engineer
-      - data platform
-      - data infrastructure
-      - etl developer
-      - bi developer
-      - business intelligence
-      - data analyst
-      - analytics analyst
+gradireland:
+  pages: 3                 # newest ~36 listings per run
 
-  devops_cloud:
-    enabled: true
-    keywords:
-      - devops
-      - sre
-      - site reliability
-      - cloud engineer
-      - cloud architect
-      - platform engineer
-      - infrastructure engineer
-      - aws engineer
-      - azure engineer
-      - kubernetes
+aggregators:
+  jooble: true             # needs JOOBLE_API_KEY secret (free)
+  adzuna: true             # needs ADZUNA_APP_ID + ADZUNA_APP_KEY (free)
+  adzuna_countries: [gb, de, nl, sg]
+  arbeitnow: true          # keyless; visa-sponsor jobs, pre-verified
+  remotive: true           # keyless; remote jobs
+  remoteok: true           # keyless; remote jobs
 
-  project_management:
-    enabled: true
-    keywords:
-      - project manager
-      - project coordinator
-      - programme manager
-      - program manager
-      - technical project
-      - delivery manager
-      - scrum master
-      - product manager
-      - product owner
-
-  other_relevant:
-    enabled: true
-    keywords:
-      - graduate programme
-      - graduate program
-      - graduate scheme
-      - graduate developer
-      - graduate engineer
-      - graduate analyst
-      - associate consultant
-      - associate engineer
-      - technical consultant
-      - solutions engineer
-      - business analyst
-      - systems analyst
-      - qa engineer
-      - quality assurance
-      - test engineer
-      - cybersecurity analyst
-      - security analyst
-      - automation engineer
-
-# ── Seniority filter ────────────────────────────────────────────────────────
-reject_if_title_contains:
-  - senior
-  - sr.
-  - staff engineer
-  - staff software
-  - staff data
-  - principal
-  - director
-  - vp
-  - vice president
-  - head of
-  - chief
-  - distinguished
-  - 5+ years
-  - 7+ years
-  - 10+ years
-  - "experienced "
-
-reject_phrases:
-  - "senior software"
-  - "senior data"
-  - "senior engineer"
-  - "senior developer"
-  - "engineering manager"
-  - "lead engineer"
-  - "lead developer"
-  - "lead data"
-
-# ── Relevance scoring ───────────────────────────────────────────────────────
+# ── Relevance scoring & routing ─────────────────────────────────────────────
 scoring:
-  telegram_threshold: 0.48
-  max_telegram_per_run: 10
   cv_text_file: "data/cv_text.txt"
+  telegram_thresholds:
+    ireland: 0.44          # lower bar — an Ireland match is worth pinging
+    default: 0.52
+  email_floor: 0.28        # below this, jobs are dropped to keep email sane
+  max_telegram_per_run: 10
 
-# ── Notification routing ────────────────────────────────────────────────────
 notifications:
   email:
     enabled: true
-    daily_digest_hour: 8
-    instant_runs: true
   telegram:
     enabled: true
-    only_above_threshold: true
+
+# ── Networking events (weekly digest, events_run.py) ────────────────────────
+events:
+  days_ahead: 45
+  gradireland_events: true
+  meetup_groups:           # public iCal feeds, no API key
+    - cork-ai
+    - corkdevs
+    - Cork-Big-Data-Analytics-Group
+    - pythonireland
+    - DublinAI
