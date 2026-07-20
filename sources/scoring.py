@@ -119,6 +119,8 @@ def score_jobs(jobs: List[Dict], cv_path: str) -> List[Dict]:
         texts.append(text)
 
     vecs = model.encode(texts, normalize_embeddings=True, batch_size=32)
+    # Ensure cv_vec is 1D for proper matrix multiplication
+    cv_vec = np.squeeze(cv_vec)
     cosines = (vecs @ cv_vec).tolist()
 
     for job, cosine in zip(jobs, cosines):
