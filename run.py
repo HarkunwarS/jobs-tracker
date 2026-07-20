@@ -1,6 +1,6 @@
 """
 Job Tracker v6 — Ireland-first, broad early-career recall
-═══════════════════════════════════════════════════════════════════════════
+═════════════════════════════════════════════════════════════════════════════
 
 Pipeline (every 30 min on weekdays via GitHub Actions):
   1. Load config + seen-cache
@@ -47,7 +47,7 @@ SEEN_FILE = Path("data/seen_jobs.json")
 SEEN_MAX_AGE_DAYS = 120
 
 
-# ── State helpers ───────────────────────────────────────────────────────────
+# ── State helpers ─────────────────────────────────────────────────────────
 
 def load_yaml(path: Path) -> Dict:
     with open(path) as f:
@@ -78,7 +78,7 @@ def save_seen(seen: Dict[str, str]) -> None:
         json.dump(pruned, f)
 
 
-# ── Main ────────────────────────────────────────────────────────────────────
+# ── Main ────────────────────────────────────────────────────────────
 
 def main() -> int:
     print(f"\n🔍 Job Tracker v6 — {datetime.now():%Y-%m-%d %H:%M:%S}")
@@ -166,12 +166,19 @@ def main() -> int:
     scoring_cfg = cfg.get("scoring", {})
     cv_path = scoring_cfg.get("cv_text_file", "data/cv_text.txt")
     print(f"\n🎯 Scoring {len(kept)} jobs against CV…")
-    if Path(cv_path).exists():
-        kept = score_jobs(kept, cv_path)
-        alerts, rest, dropped = route_jobs(kept, scoring_cfg)
-        print(f"  {len(alerts)} alert-worthy · {len(rest)} email-only · {len(dropped)} below floor")
-    else:
-        print(f"  ⚠️  CV file {cv_path} missing — skipping scoring, all to email")
+    try:
+        if Path(cv_path).exists():
+            kept = score_jobs(kept, cv_path)
+            alerts, rest, dropped = route_jobs(kept, scoring_cfg)
+            print(f"  {len(alerts)} alert-worthy · {len(rest)} email-only · {len(dropped)} below floor")
+        else:
+            print(f"  ⚠️  CV file {cv_path} missing — skipping scoring, all to email")
+            for j in kept:
+                j["score"] = 0.0
+            alerts, rest = [], kept
+    except Exception as e:
+        print(f"  ❌ Scoring failed: {type(e).__name__}: {e}")
+        print("  Falling back to email-only mode (no scoring)")
         for j in kept:
             j["score"] = 0.0
         alerts, rest = [], kept
