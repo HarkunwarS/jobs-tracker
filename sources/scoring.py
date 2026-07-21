@@ -75,9 +75,18 @@ def get_cv_embedding(cv_path: str) -> np.ndarray:
 
     if cache_path.exists():
         try:
-            _cv_embedding = np.load(cache_path)
-            print(f"  ✓ CV embedding loaded from cache")
-            return _cv_embedding
+            cached = np.load(cache_path)
+            # Validate against the model's real embedding size — a stale or
+            # corrupt cache (wrong dimension) once crashed every run at the
+            # similarity step. Never trust the cache blindly.
+            expected = _load_model().get_sentence_embedding_dimension()
+            if cached.ndim == 1 and cached.shape[0] == expected:
+                _cv_embedding = cached
+                print("  ✓ CV embedding loaded from cache")
+                return _cv_embedding
+            print(f"  ⚠️  Cached CV embedding invalid (shape {cached.shape}, "
+                  f"expected ({expected},)) — re-encoding")
+            cache_path.unlink(missing_ok=True)
         except Exception as e:
             print(f"  ⚠️  Failed to load cached embedding: {e}, re-encoding…")
 
