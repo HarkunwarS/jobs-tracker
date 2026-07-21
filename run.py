@@ -166,6 +166,7 @@ def main() -> int:
     scoring_cfg = cfg.get("scoring", {})
     cv_path = scoring_cfg.get("cv_text_file", "data/cv_text.txt")
     print(f"\n🎯 Scoring {len(kept)} jobs against CV…")
+    scoring_failed = False
     try:
         if Path(cv_path).exists():
             kept = score_jobs(kept, cv_path)
@@ -177,8 +178,10 @@ def main() -> int:
                 j["score"] = 0.0
             alerts, rest = [], kept
     except Exception as e:
+        scoring_failed = True
         print(f"  ❌ Scoring failed: {type(e).__name__}: {e}")
-        print("  Falling back to email-only mode (no scoring)")
+        print("  ❌ Sending UNSCORED jobs by email so nothing is lost, but this")
+        print("  ❌ run will exit non-zero — check the log and fix scoring!")
         for j in kept:
             j["score"] = 0.0
         alerts, rest = [], kept
@@ -200,6 +203,9 @@ def main() -> int:
     except Exception as e:
         print(f"  ⚠️  Telegram raised: {e}")
 
+    if scoring_failed:
+        print(f"\n❌ Done WITH SCORING FAILURE. Seen-cache: {len(seen)} entries.")
+        return 1
     print(f"\n✅ Done. Seen-cache: {len(seen)} entries.")
     return 0
 
