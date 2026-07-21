@@ -2,18 +2,29 @@ name: Job Tracker
 
 on:
   schedule:
-    # Hourly, 7 AM to 11 PM Irish time (Mon-Fri).
-    # Cron is UTC. Irish summer time = UTC+1, winter = UTC+0.
-    # 06:00–22:00 UTC covers both year-round.
-    - cron: "0 6-22 * * 1-5"
-    # Lighter weekend cadence — every 2 hours
-    - cron: "0 8,10,12,14,16,18,20 * * 0,6"
-  workflow_dispatch:   # lets you trigger manually from the GitHub UI
+    # Every 30 min, 7:00–23:00 Irish time, Mon–Fri. Cron is UTC; 06–22 UTC
+    # covers Irish summer (UTC+1) and winter (UTC+0) year-round.
+    # NOTE: GitHub schedules often fire 5–30 min late — the LinkedIn window
+    # (3h) and seen-cache absorb that with zero missed jobs.
+    - cron: "0,30 6-22 * * 1-5"
+    # Weekends: every 2 hours
+    - cron: "0 8-20/2 * * 0,6"
+  workflow_dispatch:
+
+# One run at a time — overlapping runs racing on the seen-cache caused
+# duplicate alerts in v5.
+concurrency:
+  group: job-tracker
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # required for the seen-cache commit; v5 omitted this,
+                    # so the push could fail silently on default-token repos
 
 jobs:
   run-tracker:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repo
@@ -30,15 +41,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Cache CV embedding and seen-jobs
+      # v5 cached pip but re-downloaded the ~90 MB sentence-transformers
+      # model on EVERY run. Cache the HuggingFace dir + CV embedding.
+      - name: Cache embedding model + CV embedding
         uses: actions/cache@v4
         with:
           path: |
-            data/cv_text.embedding.npy
-            data/seen_jobs.json
-          key: job-tracker-state-${{ github.run_id }}
+            ~/.cache/huggingface
+            data/*.npy
+          key: hf-minilm-v1-${{ hashFiles('data/cv_text.txt') }}
           restore-keys: |
-            job-tracker-state-
+            hf-minilm-v1-
 
       - name: Run tracker
         env:
@@ -47,14 +60,25 @@ jobs:
           EMAIL_RECIPIENT:    ${{ secrets.EMAIL_RECIPIENT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python run.py
+          JOOBLE_API_KEY:     ${{ secrets.JOOBLE_API_KEY }}
+          ADZUNA_APP_ID:      ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY:     ${{ secrets.ADZUNA_APP_KEY }}
+        run: python run.py | tee run.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo '### Job Tracker run' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "📥|📊|🎯|✉️|📱|✅|⚠️" run.log >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit updated seen-cache
-        # Persist seen_jobs.json across runs by committing it back to the repo.
-        # The cache action above is best-effort; this is the durable backup.
         run: |
           git config user.name  "job-tracker-bot"
-          git config user.email "bot@example.com"
+          git config user.email "bot@users.noreply.github.com"
+          # Another run may have pushed while we worked — rebase first
+          git pull --rebase --autostash origin "${GITHUB_REF_NAME}" || true
           git add data/seen_jobs.json
           git diff --staged --quiet || git commit -m "chore: update seen-jobs cache [skip ci]"
-          git push || echo "nothing to push"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
