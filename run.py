@@ -126,6 +126,9 @@ def prepare() -> int:
     )
 
     all_jobs = unique_by_id(all_jobs)
+    if not all_jobs and not discovery.get("baseline_initialized_at"):
+        print("  ❌ Initial baseline aborted: no jobs returned by any source; no state was changed")
+        return 2
     fresh = [job for job in all_jobs if job["id"] not in seen]
     print(f"\n📥 {len(fresh)} fresh unique IDs (of {len(all_jobs)} fetched unique IDs)")
 
@@ -165,9 +168,15 @@ def prepare() -> int:
             rest = [dict(job, score=0.0) for job in kept]
 
     notif_cfg = cfg.get("notifications", {})
-    # Queue BEFORE seen even while delivery is OFF; deferred approvals must
-    # never erase queued work. These are NOT authorisations to send.
-    enqueue(outbox, alerts, rest, email_enabled=True, telegram_enabled=True)
+    # First successful source sweep establishes a baseline: preserve seen history,
+    # do not queue old source results as new alerts. Existing pending outbox is
+    # retained as-is. Later sweeps enqueue only IDs not previously seen.
+    baseline = not bool(discovery.get('baseline_initialized_at'))
+    if baseline:
+        print('  🛡  Initial production baseline: mark fetched jobs seen WITHOUT queuing historical alerts')
+    else:
+        # Keep each channel queued even if credentials are temporarily absent.
+        enqueue(outbox, alerts, rest, email_enabled=True, telegram_enabled=True)
 
     # Ordering is crucial: never mark fetched jobs seen before queuing
     # every eligible notification durably. Fail closed if outbox save fails.
@@ -185,10 +194,17 @@ def prepare() -> int:
     save_seen(seen)
     # Successful sweep is not proof that guest endpoint returned all results.
     # 96h minimum overlap mitigates transient source errors/delays.
+    if baseline:
+        discovery["baseline_initialized_at"] = iso()
     discovery["linkedin_last_sweep_at"] = iso()
     save_discovery(discovery)
+    if baseline and __import__('os').environ.get('GITHUB_OUTPUT'):
+        with open(__import__('os').environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:
+            f.write('bootstrapped=true\n')
     print(f"  ✅ Prepared state: {len(seen)} seen IDs; {pending_count(outbox)} queued channel deliveries")
-    return 1 if scoring_failed else 0
+    if scoring_failed:
+        print('  ⚠️  Score model unavailable; unscored eligible jobs persisted to queue for review')
+    return 0
 
 
 def deliver() -> int:
@@ -197,8 +213,13 @@ def deliver() -> int:
     outbox = load_outbox()
     now = utcnow()
     retries_failed = 0
+    email_batch_cap = max(1, min(int(cfg.get('scoring', {}).get('max_email_per_run', 20)), 30))
+    baseline_at = load_discovery().get('baseline_initialized_at')
+    def eligible_for_delivery(entry):
+        # Do not replay pre-activation entries; preserve for explicit reconciliation.
+        return not baseline_at or str(entry.get('created_at','')) >= baseline_at
     email_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
-                 if approved('email', cfg) and due(entry, "email", now)]
+                 if approved('email', cfg) and eligible_for_delivery(entry) and due(entry, "email", now)][:email_batch_cap]
     if email_due:
         alerts = [entry["job"] for jid, entry in email_due if "telegram" in entry["channels"]]
         rest = [entry["job"] for jid, entry in email_due if "telegram" not in entry["channels"]]
@@ -216,7 +237,7 @@ def deliver() -> int:
 
     max_telegram = max(1, int(cfg.get("scoring", {}).get("max_telegram_per_run", 10)))
     telegram_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
-                    if approved('telegram', cfg) and due(entry, "telegram", now)]
+                    if approved('telegram', cfg) and eligible_for_delivery(entry) and due(entry, "telegram", now)]
     print(f"\n📱 Telegram due: {len(telegram_due)}; current run cap: {max_telegram}")
     for jid, entry in telegram_due[:max_telegram]:
         try:

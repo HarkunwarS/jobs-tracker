@@ -6,6 +6,7 @@ artifacts using upload-artifact if all pushes fail, and stop the workflow.
 from __future__ import annotations
 
 import copy
+import os
 import subprocess
 import sys
 import time
@@ -74,8 +75,12 @@ def commit_if_changed(message):
 
 
 def main(branch):
-    if not branch or not branch.startswith('staging/') or branch.startswith('-'):
-        raise ValueError('State push prohibited: non-staging branch')
+    if branch != 'main':
+        raise ValueError('State push prohibited: only main is an approved production state branch')
+    if not (os.environ.get('GITHUB_ACTIONS') == 'true'
+            and os.environ.get('GITHUB_REPOSITORY') == 'HarkunwarS/jobs-tracker'
+            and os.environ.get('GITHUB_REF_NAME') == 'main'):
+        raise ValueError('State push prohibited outside production GitHub Actions')
     import yaml
     cfg = yaml.safe_load(Path('config.yaml').read_text()) or {}
     if cfg.get('runtime', {}).get('mode') != 'production':

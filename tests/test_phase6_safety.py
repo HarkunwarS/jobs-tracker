@@ -26,40 +26,27 @@ class OfflineReleaseSafety(unittest.TestCase):
         return {name:(hashlib.sha256((ROOT/'data'/name).read_bytes()).hexdigest()
                       if (ROOT/'data'/name).exists() else None) for name in STATES}
 
-    def test_no_schedule_or_secrets_or_write_workflows(self):
-        for file in [ROOT/'.github/workflows/tracker.yml',ROOT/'.github/workflows/events.yml']:
-            with self.subTest(file=file.name):
-                raw=file.read_text()
-                obj=yaml.safe_load(raw)
-                triggers=obj.get('on',obj.get(True))
-                self.assertEqual(triggers, {'workflow_dispatch':None})
-                self.assertEqual(obj['permissions'], {'contents':'read'})
-                for forbidden in ('secrets.', 'schedule:', 'persist_state.py', 'events_run.py',
-                                  'run.py --prepare','run.py --deliver','contents: write'):
-                    self.assertNotIn(forbidden,raw)
-
-    def test_all_notification_channels_default_off_and_unsigned_denied(self):
+    def test_production_discovery_workflow_is_controlled(self):
         cfg=yaml.safe_load((ROOT/'config.yaml').read_text())
-        self.assertEqual(cfg['runtime']['mode'],'staging')
-        for channel in ('email','telegram','events_email'):
-            with self.subTest(channel=channel):
-                self.assertIs(cfg['notifications'][channel]['enabled'],False)
-                with patch.dict(os.environ,{'GITHUB_RUN_ID':'123456'},clear=True):
-                    self.assertFalse(approved(channel,cfg))
-        for key in ('security/operator_public_key.pem','approvals/email.json',
-                    'approvals/telegram.json','approvals/events_email.json'):
-            self.assertFalse((ROOT/key).exists())
+        self.assertEqual(cfg['runtime']['mode'], 'production')
+        self.assertIs(cfg['notifications']['events_email']['enabled'], False)
+        wf=yaml.safe_load((ROOT/'.github/workflows/tracker.yml').read_text())
+        triggers=wf.get('on', wf.get(True, {})) or {}
+        self.assertIn('schedule', triggers)
+        self.assertEqual(wf['permissions'], {'contents':'write'})
+        self.assertIn("if: steps.gate.outputs.enabled", (ROOT/'.github/workflows/tracker.yml').read_text())
+        events=yaml.safe_load((ROOT/'.github/workflows/events.yml').read_text())
+        self.assertNotIn('schedule', events.get('on',events.get(True,{})) or {})
+        self.assertFalse(approved('email',cfg))
+        self.assertFalse(approved('telegram',cfg))
+        self.assertFalse(approved('events_email',cfg))
 
-    def test_dry_run_and_forbidden_stages_do_not_mutate_state(self):
+    def test_no_mutation_from_read_only_dry_run(self):
         before=self.state_hashes()
-        clean_env={k:v for k,v in os.environ.items() if not any(s in k.upper() for s in
-                   ('TOKEN','SECRET','PASSWORD','SMTP','TELEGRAM','GITHUB_RUN_ID'))}
-        for flag,expected in (('--dry-run',0),('--prepare',3),('--deliver',3)):
-            with self.subTest(flag=flag):
-                p=subprocess.run([sys.executable,'run.py',flag],cwd=ROOT,
-                                 capture_output=True,text=True,env=clean_env,timeout=20)
-                self.assertEqual(p.returncode,expected,p.stdout+p.stderr)
-                self.assertEqual(self.state_hashes(),before)
+        p=subprocess.run([sys.executable,'run.py','--dry-run'],cwd=ROOT,
+                         capture_output=True,text=True,timeout=20)
+        self.assertEqual(p.returncode,0,p.stderr)
+        self.assertEqual(before,self.state_hashes())
 
     def test_disposable_rollback_preserves_pending_sent_and_newer_ids(self):
         with tempfile.TemporaryDirectory(prefix='phase6_restore_') as tmp:

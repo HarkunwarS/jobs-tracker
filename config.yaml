@@ -161,17 +161,19 @@ scoring:
     ireland: 0.44          # lower bar — an Ireland match is worth pinging
     default: 0.52
   email_floor: 0.28        # below this, jobs are dropped to keep email sane
-  max_telegram_per_run: 10
+  max_telegram_per_run: 5
+  max_email_per_run: 20
 
-# Runtime and delivery are intentionally OFF; staging never accepts transport approvals.
+# Production discovery enabled. Email and Telegram still require a signed operator permit + secrets.
+# Events remain OFF.
 runtime:
-  mode: staging
-  dry_run: true
+  mode: production
+  dry_run: false
 notifications:
   email:
-    enabled: false
+    enabled: true
   telegram:
-    enabled: false
+    enabled: true
   events_email:
     enabled: false
 
