@@ -132,7 +132,9 @@ keywords:
     - project coordinator
 
 linkedin:
-  window_hours: 3          # search window; > run cadence so gaps can't open
+  window_hours: 96         # minimum 4d overlap handles nights/weekends/delays
+  maximum_window_hours: 168 # adaptive lookback cap: one week
+  pages_per_search: 2     # fetch pages 0 and 1 when available
   detail_fetch_cap: 15     # max description fetches per run (visa candidates)
   abroad_locations:
     - United Kingdom
@@ -161,11 +163,17 @@ scoring:
   email_floor: 0.28        # below this, jobs are dropped to keep email sane
   max_telegram_per_run: 10
 
+# Runtime and delivery are intentionally OFF; staging never accepts transport approvals.
+runtime:
+  mode: staging
+  dry_run: true
 notifications:
   email:
-    enabled: true
+    enabled: false
   telegram:
-    enabled: true
+    enabled: false
+  events_email:
+    enabled: false
 
 # ── Networking events (weekly digest, events_run.py) ────────────────────────
 events:

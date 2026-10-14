@@ -1,29 +1,16 @@
+"""Job Tracker v6 P0 hardening — prepare an outbox, commit, then deliver.
+
+GitHub Actions runs `--prepare`, persists state to the remote branch, runs
+`--deliver`, and persists delivery receipts. Default `python run.py` does
+both for local use, but cannot guard against an external git-push failure.
+The outbox provides at-least-once delivery; exactly-once is not achievable
+with SMTP/Telegram without provider idempotency guarantees.
 """
-Job Tracker v6 — Ireland-first, broad early-career recall
-═════════════════════════════════════════════════════════════════════════════
-
-Pipeline (every 30 min on weekdays via GitHub Actions):
-  1. Load config + seen-cache
-  2. Fetch in parallel: ATS/company sources (Greenhouse, Lever, Ashby,
-     Workable, SmartRecruiters, Personio, Workday, Jibe career sites),
-     gradireland, LinkedIn sweep, aggregators (Jooble, Adzuna, Arbeitnow,
-     Remotive, RemoteOK)
-  3. Dedup against seen-cache
-  4. Filter: reject-first (senior / wrong sector / out of scope);
-     fetch LinkedIn descriptions for visa-gate candidates
-  5. Score against CV (MiniLM cosine + keyword boosts)
-  6. Persist seen-cache  ←  BEFORE notifications, so a notify failure can
-     never cause duplicate alerts or a re-processing loop
-  7. Notify: Telegram (per-scope thresholds) + email (everything, grouped)
-
-Config: config.yaml + companies.yaml
-"""
-
 from __future__ import annotations
 
-import json
+import argparse
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -32,84 +19,92 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 from sources.ats import fetch_all_companies
-from sources.aggregators import (
-    fetch_adzuna, fetch_arbeitnow, fetch_jooble, fetch_remoteok, fetch_remotive,
-)
+from sources.aggregators import fetch_adzuna, fetch_arbeitnow, fetch_jooble, fetch_remoteok, fetch_remotive
 from sources.gradboards import fetch_gradireland
-from sources.linkedin import enrich_descriptions, fetch_linkedin_sweep
+from sources.linkedin import enrich_descriptions, fetch_linkedin_sweep, lookback_hours
 from sources.filters import filter_jobs, scope_of
 from sources.scoring import route_jobs, score_jobs
 from sources.notify import send_email, send_telegram
+from sources.approval import approved
+from sources.state import (StateError, load_json, save_json, validate_discovery,
+                           validate_outbox, validate_seen)
+from sources.outbox import (due, empty_outbox, enqueue, iso, pending_count,
+                            prune_delivered, record_delivery, utcnow)
 
 CONFIG_FILE = Path("config.yaml")
 COMPANIES_FILE = Path("companies.yaml")
 SEEN_FILE = Path("data/seen_jobs.json")
-SEEN_MAX_AGE_DAYS = 120
+OUTBOX_FILE = Path("data/notification_outbox.json")
+DISCOVERY_FILE = Path("data/discovery_state.json")
 
-
-# ── State helpers ─────────────────────────────────────────────────────────
 
 def load_yaml(path: Path) -> Dict:
-    with open(path) as f:
-        return yaml.safe_load(f) or {}
+    with open(path, encoding="utf-8") as stream:
+        return yaml.safe_load(stream) or {}
 
 
 def load_seen() -> Dict[str, str]:
-    """seen-cache is {job_id: iso_date_first_seen}. Migrates the old
-    v5 list format transparently."""
-    if not SEEN_FILE.exists():
-        return {}
-    try:
-        with open(SEEN_FILE) as f:
-            data = json.load(f)
-    except Exception:
-        return {}
-    if isinstance(data, list):                      # v5 format
-        today = datetime.now().strftime("%Y-%m-%d")
-        return {jid: today for jid in data}
-    return data if isinstance(data, dict) else {}
+    return load_json(SEEN_FILE, validate_seen, {})
 
 
 def save_seen(seen: Dict[str, str]) -> None:
-    SEEN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    cutoff = (datetime.now() - timedelta(days=SEEN_MAX_AGE_DAYS)).strftime("%Y-%m-%d")
-    pruned = {jid: d for jid, d in seen.items() if d >= cutoff}
-    with open(SEEN_FILE, "w") as f:
-        json.dump(pruned, f)
+    # Intentionally retain all historical IDs. Old v6 120-day automatic
+    # pruning would violate the user-requested preservation guarantee.
+    save_json(SEEN_FILE, seen, validate_seen)
 
 
-# ── Main ────────────────────────────────────────────────────────────
+def load_outbox():
+    return load_json(OUTBOX_FILE, validate_outbox, empty_outbox())
 
-def main() -> int:
-    print(f"\n🔍 Job Tracker v6 — {datetime.now():%Y-%m-%d %H:%M:%S}")
-    print("=" * 64)
 
+def save_outbox(outbox):
+    save_json(OUTBOX_FILE, outbox, validate_outbox)
+
+
+def load_discovery():
+    return load_json(DISCOVERY_FILE, validate_discovery, {"linkedin_last_sweep_at": ""})
+
+
+def save_discovery(state):
+    save_json(DISCOVERY_FILE, state, validate_discovery)
+
+
+def unique_by_id(jobs):
+    """Within-run ID dedup; keeps existing source IDs intact."""
+    result, keys = [], set()
+    for job in jobs:
+        jid = str(job.get("id", "") or "")
+        if not jid or jid in keys:
+            continue
+        keys.add(jid)
+        result.append(job)
+    return result
+
+
+def prepare() -> int:
+    print(f"\n🔍 Job Tracker v6 P0 — prepare {iso()}")
     cfg = load_yaml(CONFIG_FILE)
     companies = load_yaml(COMPANIES_FILE)
     seen = load_seen()
-    print(f"  📋 {len(seen)} jobs in seen-cache")
+    outbox = load_outbox()
+    discovery = load_discovery()
+    print(f"  📋 {len(seen)} historical seen IDs; {pending_count(outbox)} outstanding deliveries")
 
     kw_cfg = cfg.get("keywords", {})
     agg_cfg = cfg.get("aggregators", {})
     li_cfg = cfg.get("linkedin", {})
-
-    # ── 1. Fetch everything ──
     all_jobs: List[Dict] = []
 
     print("\n🌐 ATS & company career sites…")
     all_jobs += fetch_all_companies(companies)
-
     print("\n🎓 Graduate boards…")
     all_jobs += fetch_gradireland(pages=int(cfg.get("gradireland", {}).get("pages", 3)))
-
     print("\n📦 Aggregators…")
     if agg_cfg.get("jooble", True):
         all_jobs += fetch_jooble(kw_cfg.get("aggregator_queries", ["graduate"]), location="Ireland")
     if agg_cfg.get("adzuna", True):
-        all_jobs += fetch_adzuna(
-            kw_cfg.get("aggregator_queries", ["graduate"]),
-            countries=agg_cfg.get("adzuna_countries", ["gb"]),
-        )
+        all_jobs += fetch_adzuna(kw_cfg.get("aggregator_queries", ["graduate"]),
+                                 countries=agg_cfg.get("adzuna_countries", ["gb"]))
     if agg_cfg.get("arbeitnow", True):
         all_jobs += fetch_arbeitnow(visa_only=True)
     if agg_cfg.get("remotive", True):
@@ -117,97 +112,168 @@ def main() -> int:
     if agg_cfg.get("remoteok", True):
         all_jobs += fetch_remoteok()
 
+    minimum_hours = max(96, int(li_cfg.get("window_hours", 96)))
+    maximum_hours = max(minimum_hours, int(li_cfg.get("maximum_window_hours", 168)))
+    lookback = lookback_hours(discovery.get("linkedin_last_sweep_at"),
+                              minimum=minimum_hours, maximum=maximum_hours)
     print("\n🔗 LinkedIn…")
     all_jobs += fetch_linkedin_sweep(
         ireland_keywords=kw_cfg.get("linkedin_ireland", ["graduate"]),
         abroad_keywords=kw_cfg.get("linkedin_abroad", ["graduate programme"]),
         abroad_locations=li_cfg.get("abroad_locations", []),
-        window_hours=int(li_cfg.get("window_hours", 3)),
+        window_hours=lookback,
+        pages_per_search=int(li_cfg.get("pages_per_search", 2)),
     )
 
-    # ── 2. Dedup ──
-    fresh = [j for j in all_jobs if j["id"] not in seen]
-    print(f"\n📥 {len(fresh)} fresh (of {len(all_jobs)} fetched)")
-    if not fresh:
-        print("  No new jobs. Done.")
-        return 0
+    all_jobs = unique_by_id(all_jobs)
+    fresh = [job for job in all_jobs if job["id"] not in seen]
+    print(f"\n📥 {len(fresh)} fresh unique IDs (of {len(all_jobs)} fetched unique IDs)")
 
-    # ── 3. Filter ──
     kept, unverified, counters = filter_jobs(fresh, cfg)
-
-    # LinkedIn visa-gate candidates: fetch their descriptions, re-check
-    if unverified:
-        li_unverified = [j for j in unverified if j.get("li_job_id")]
-        if li_unverified:
-            print(f"\n🔎 {len(li_unverified)} visa-gate candidates need descriptions…")
-            enrich_descriptions(li_unverified, cap=int(li_cfg.get("detail_fetch_cap", 15)))
-            for j in li_unverified:
-                scope = scope_of(j, cfg)
-                if scope and scope != "visa_unverified":
-                    j["scope"] = scope
-                    kept.append(j)
-                    counters["kept"] += 1
+    li_unverified = [job for job in unverified if job.get("li_job_id")]
+    if li_unverified:
+        print(f"\n🔎 {len(li_unverified)} LinkedIn sponsorship candidates need descriptions…")
+        enrich_descriptions(li_unverified, cap=int(li_cfg.get("detail_fetch_cap", 15)))
+        for job in li_unverified:
+            scope = scope_of(job, cfg)
+            if scope and scope not in ("visa_unverified", "eligibility_unverified"):
+                job["scope"] = scope
+                kept.append(job)
+                counters["kept"] += 1
 
     print(f"\n📊 Filters: kept {counters['kept']} · senior {counters['senior']} · "
-          f"wrong-sector {counters['sector']} · out-of-scope {counters['out_of_scope']} · "
-          f"visa-unverified {counters['unverified']}")
+          f"sector {counters['sector']} · out-of-scope {counters['out_of_scope']} · "
+          f"sponsorship-unverified {counters['unverified']}")
 
-    # Everything fetched this run is now "seen", relevant or not
-    today = datetime.now().strftime("%Y-%m-%d")
-    for j in fresh:
-        seen.setdefault(j["id"], today)
-
-    if not kept:
-        save_seen(seen)
-        print("\n  No relevant jobs after filtering. Done.")
-        return 0
-
-    # ── 4. Score ──
-    scoring_cfg = cfg.get("scoring", {})
-    cv_path = scoring_cfg.get("cv_text_file", "data/cv_text.txt")
-    print(f"\n🎯 Scoring {len(kept)} jobs against CV…")
     scoring_failed = False
-    try:
-        if Path(cv_path).exists():
-            kept = score_jobs(kept, cv_path)
-            alerts, rest, dropped = route_jobs(kept, scoring_cfg)
-            print(f"  {len(alerts)} alert-worthy · {len(rest)} email-only · {len(dropped)} below floor")
-        else:
-            print(f"  ⚠️  CV file {cv_path} missing — skipping scoring, all to email")
-            for j in kept:
-                j["score"] = 0.0
-            alerts, rest = [], kept
-    except Exception as e:
-        scoring_failed = True
-        print(f"  ❌ Scoring failed: {type(e).__name__}: {e}")
-        print("  ❌ Sending UNSCORED jobs by email so nothing is lost, but this")
-        print("  ❌ run will exit non-zero — check the log and fix scoring!")
-        for j in kept:
-            j["score"] = 0.0
-        alerts, rest = [], kept
+    alerts, rest = [], []
+    if kept:
+        scoring_cfg = cfg.get("scoring", {})
+        cv_path = scoring_cfg.get("cv_text_file", "data/cv_text.txt")
+        print(f"\n🎯 Scoring {len(kept)} jobs against CV…")
+        try:
+            if Path(cv_path).exists():
+                scored = score_jobs(kept, cv_path)
+                alerts, rest, dropped = route_jobs(scored, scoring_cfg)
+                print(f"  {len(alerts)} alert-worthy · {len(rest)} email-only · {len(dropped)} below floor")
+            else:
+                print(f"  ⚠️  CV file missing: {cv_path}; enqueueing unscored email digest")
+                rest = [dict(job, score=0.0) for job in kept]
+        except Exception as exc:
+            scoring_failed = True
+            print(f"  ❌ Scoring failed: {type(exc).__name__}: {exc}")
+            rest = [dict(job, score=0.0) for job in kept]
 
-    # ── 5. Persist state BEFORE notifying ──
-    save_seen(seen)
-
-    # ── 6. Notify (each guarded; a failure can't break the run) ──
-    print("\n📤 Notifications…")
     notif_cfg = cfg.get("notifications", {})
-    try:
-        if notif_cfg.get("email", {}).get("enabled", True):
-            send_email(alerts, rest)
-    except Exception as e:
-        print(f"  ⚠️  Email raised: {e}")
-    try:
-        if notif_cfg.get("telegram", {}).get("enabled", True) and alerts:
-            send_telegram(alerts, max_per_run=int(scoring_cfg.get("max_telegram_per_run", 10)))
-    except Exception as e:
-        print(f"  ⚠️  Telegram raised: {e}")
+    # Queue BEFORE seen even while delivery is OFF; deferred approvals must
+    # never erase queued work. These are NOT authorisations to send.
+    enqueue(outbox, alerts, rest, email_enabled=True, telegram_enabled=True)
 
-    if scoring_failed:
-        print(f"\n❌ Done WITH SCORING FAILURE. Seen-cache: {len(seen)} entries.")
-        return 1
-    print(f"\n✅ Done. Seen-cache: {len(seen)} entries.")
-    return 0
+    # Ordering is crucial: never mark fetched jobs seen before queuing
+    # every eligible notification durably. Fail closed if outbox save fails.
+    save_outbox(outbox)
+    today = datetime.now(timezone.utc).date().isoformat()
+    unresolved = {job["id"] for job in unverified
+                  if scope_of(job, cfg) in ("visa_unverified", "eligibility_unverified")}
+    # Missing descriptions are not negative sponsorship evidence. Defer
+    # marking those jobs seen so the next overlapping sweep can retry.
+    for job in fresh:
+        if job["id"] not in unresolved:
+            seen.setdefault(job["id"], today)
+    if unresolved:
+        print(f"  ⚠️  {len(unresolved)} unverified jobs deferred for retry; not marked seen")
+    save_seen(seen)
+    # Successful sweep is not proof that guest endpoint returned all results.
+    # 96h minimum overlap mitigates transient source errors/delays.
+    discovery["linkedin_last_sweep_at"] = iso()
+    save_discovery(discovery)
+    print(f"  ✅ Prepared state: {len(seen)} seen IDs; {pending_count(outbox)} queued channel deliveries")
+    return 1 if scoring_failed else 0
+
+
+def deliver() -> int:
+    """Replay stored deliveries without fetching/scoring jobs or mutating seen."""
+    cfg = load_yaml(CONFIG_FILE)
+    outbox = load_outbox()
+    now = utcnow()
+    retries_failed = 0
+    email_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
+                 if approved('email', cfg) and due(entry, "email", now)]
+    if email_due:
+        alerts = [entry["job"] for jid, entry in email_due if "telegram" in entry["channels"]]
+        rest = [entry["job"] for jid, entry in email_due if "telegram" not in entry["channels"]]
+        print(f"\n✉️  Sending {len(email_due)} queued email entries")
+        try:
+            success = bool(send_email(alerts, rest))
+            error = None if success else "Email notifier failed or is not configured"
+        except Exception as exc:
+            success, error = False, f"{type(exc).__name__}: {exc}"
+        for jid, entry in email_due:
+            record_delivery(entry, "email", success, now=now, error=error)
+        save_outbox(outbox)
+        if not success:
+            retries_failed += len(email_due)
+
+    max_telegram = max(1, int(cfg.get("scoring", {}).get("max_telegram_per_run", 10)))
+    telegram_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
+                    if approved('telegram', cfg) and due(entry, "telegram", now)]
+    print(f"\n📱 Telegram due: {len(telegram_due)}; current run cap: {max_telegram}")
+    for jid, entry in telegram_due[:max_telegram]:
+        try:
+            success = bool(send_telegram([entry["job"]], max_per_run=1))
+            error = None if success else "Telegram notifier failed or is not configured"
+        except Exception as exc:
+            success, error = False, f"{type(exc).__name__}: {exc}"
+        record_delivery(entry, "telegram", success, now=now, error=error)
+        save_outbox(outbox)  # receipt immediately after each send
+        if not success:
+            retries_failed += 1
+
+    prune_delivered(outbox)
+    save_outbox(outbox)
+    pending = pending_count(outbox)
+    print(f"  {'❌' if retries_failed else '✅'} Delivery attempts failed: {retries_failed}; "
+          f"outstanding queued: {pending}")
+    # Fail the stage on actual delivery failures; queue survives and retries
+    # after exponential backoff on subsequent --deliver invocations.
+    return 1 if retries_failed else 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description="Job Tracker v6 P0 (offline-safe test harness)")
+    parser.add_argument("--prepare", action="store_true", help="Fetch/score and persist queue only")
+    parser.add_argument("--deliver", action="store_true", help="Deliver ONLY with operator-signed approvals")
+    parser.add_argument("--dry-run", action="store_true", help="Read-only state validation; NO sources, writes or sends")
+    args = parser.parse_args(argv)
+    if sum((args.prepare, args.deliver, args.dry_run)) > 1:
+        parser.error("Use at most one stage flag")
+    try:
+        cfg = load_yaml(CONFIG_FILE)
+        if args.dry_run:
+            seen, outbox, discovery = load_seen(), load_outbox(), load_discovery()
+            print(f"SAFE READ-ONLY dry-run: {len(seen)} seen, {pending_count(outbox)} pending; "
+                  "zero sources, zero writes, zero notifications")
+            return 0
+        if cfg.get('runtime', {}).get('mode') != 'production':
+            print('DENIED: staging mode cannot prepare or deliver; use --dry-run', file=sys.stderr)
+            return 3
+        if not (args.prepare or args.deliver):
+            print('DENIED: explicit --prepare or --deliver required', file=sys.stderr)
+            return 3
+        if args.deliver and not any(approved(c, cfg) for c in ('email', 'telegram')):
+            print('DENIED: no operator-signed channel approvals', file=sys.stderr)
+            return 3
+        if args.prepare:
+            return prepare()
+        if args.deliver:
+            return deliver()
+        p = prepare()
+        if p:
+            return p  # persist queue; CI can still run delivery as separate step
+        return deliver()
+    except (StateError, OSError, ValueError) as exc:
+        print(f"❌ State/workflow failure: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

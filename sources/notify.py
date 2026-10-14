@@ -1,14 +1,5 @@
-"""
-Notifications v6: email (everything, grouped by scope) + Telegram (alerts).
-
-Fixes vs v5:
-  - v5's _score_badge had a signature mismatch (called with 2 args, defined
-    with 1) plus an undefined-variable reference: EVERY email send crashed,
-    which also killed Telegram and the seen-cache save downstream. That is
-    the main reason the tracker went quiet.
-  - Email is now grouped Ireland-first, with category chips.
-  - Each notifier is exception-safe; run.py also persists state BEFORE
-    notifying, so a flaky SMTP can never cause duplicate-processing loops.
+"""Queued notification transports. run.py owns durable per-channel receipts/retries.
+SMTP/Telegram cannot promise exactly-once deliveries after ambiguous crashes.
 """
 
 from __future__ import annotations
@@ -21,6 +12,7 @@ from email.mime.text import MIMEText
 from typing import Dict, List
 
 import requests
+from sources.approval import approved
 
 SCOPE_META = {
     "ireland":   ("🇮🇪 Ireland", 0),
@@ -142,6 +134,9 @@ def build_email_html(alerts: List[Dict], rest: List[Dict]) -> str:
 
 
 def send_email(alerts: List[Dict], rest: List[Dict]) -> bool:
+    if not approved('email'):
+        print('  Delivery blocked: independent email approval missing')
+        return False
     sender = os.environ.get("EMAIL_SENDER", "")
     password = os.environ.get("EMAIL_PASSWORD", "")
     recipient = os.environ.get("EMAIL_RECIPIENT", "")
@@ -164,7 +159,7 @@ def send_email(alerts: List[Dict], rest: List[Dict]) -> bool:
     msg.attach(MIMEText(build_email_html(alerts, rest), "html"))
 
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as smtp:
             smtp.login(sender, password)
             smtp.sendmail(sender, recipient, msg.as_string())
         print(f"  ✉️  Email sent: {total} jobs ({len(alerts)} strong)")
@@ -175,6 +170,9 @@ def send_email(alerts: List[Dict], rest: List[Dict]) -> bool:
 
 
 def send_telegram(jobs: List[Dict], max_per_run: int = 10) -> bool:
+    if not approved('telegram'):
+        print('  Delivery blocked: independent Telegram approval missing')
+        return False
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
     if not token or not chat_id:
@@ -201,7 +199,7 @@ def send_telegram(jobs: List[Dict], max_per_run: int = 10) -> bool:
                 "chat_id": chat_id, "text": text, "parse_mode": "HTML",
                 "disable_web_page_preview": False,
             }, timeout=10)
-            if r.status_code == 200:
+            if r.status_code == 200 and r.json().get("ok") is True:
                 sent += 1
             else:
                 print(f"  ⚠️  Telegram error {r.status_code}: {r.text[:150]}")
