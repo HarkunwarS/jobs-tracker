@@ -23,7 +23,8 @@ STATES = ['seen_jobs.json', 'notification_outbox.json', 'discovery_state.json']
 
 class OfflineReleaseSafety(unittest.TestCase):
     def state_hashes(self):
-        return {name:hashlib.sha256((ROOT/'data'/name).read_bytes()).hexdigest() for name in STATES}
+        return {name:(hashlib.sha256((ROOT/'data'/name).read_bytes()).hexdigest()
+                      if (ROOT/'data'/name).exists() else None) for name in STATES}
 
     def test_no_schedule_or_secrets_or_write_workflows(self):
         for file in [ROOT/'.github/workflows/tracker.yml',ROOT/'.github/workflows/events.yml']:
