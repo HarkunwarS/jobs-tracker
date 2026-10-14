@@ -58,7 +58,7 @@ jobs:
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: python scripts/notification_gate.py
+        run: python -m scripts.notification_gate
       - name: Deliver bounded queued alerts
         if: steps.gate.outputs.enabled == 'true'
         env:
