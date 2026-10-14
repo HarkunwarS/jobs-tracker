@@ -1,5 +1,6 @@
 """Real local Git integration tests; no remote network or user checkout touched."""
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -10,8 +11,11 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/persist_state.py"
 
 
-def cmd(*args, cwd=None, check=True):
-    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=check)
+def cmd(*args, cwd=None, check=True, ci=False):
+    env = dict(os.environ)
+    if ci:
+        env.update(GITHUB_ACTIONS='true', GITHUB_REPOSITORY='HarkunwarS/jobs-tracker', GITHUB_REF_NAME='main')
+    return subprocess.run(args, cwd=cwd, capture_output=True, text=True, check=check, env=env)
 
 
 @unittest.skipUnless(shutil.which("git"), "git executable required")
@@ -36,11 +40,8 @@ class GitStateRecoveryTests(unittest.TestCase):
         cmd("git", "add", "config.yaml", cwd=self.local)
         cmd("git", "commit", "-m", "disposable fixture runtime", cwd=self.local)
         cmd("git", "push", "origin", "main", cwd=self.local)
-        cmd("git", "checkout", "-b", "staging/rehearsal", cwd=self.local)
-        cmd("git", "push", "origin", "staging/rehearsal", cwd=self.local)
         cmd("git", "clone", str(self.remote), str(self.other))
         self.config(self.other)
-        cmd("git", "checkout", "staging/rehearsal", cwd=self.other)
 
     def config(self, path):
         cmd("git", "config", "user.name", "Tester", cwd=path)
@@ -50,9 +51,9 @@ class GitStateRecoveryTests(unittest.TestCase):
         (self.other / "data/seen_jobs.json").write_text('{"initial":"2026-07-21","remote_job":"2026-10-14"}')
         cmd("git", "add", "data", cwd=self.other)
         cmd("git", "commit", "-m", "remote update", cwd=self.other)
-        cmd("git", "push", "origin", "staging/rehearsal", cwd=self.other)
+        cmd("git", "push", "origin", "main", cwd=self.other)
         (self.local / "data/seen_jobs.json").write_text('{"initial":"2026-07-21","local_job":"2026-10-14"}')
-        p = cmd(sys.executable, str(SCRIPT), "staging/rehearsal", cwd=self.local, check=False)
+        p = cmd(sys.executable, str(SCRIPT), "main", cwd=self.local, check=False, ci=True)
         self.assertEqual(p.returncode, 0, p.stdout + p.stderr)
         cmd("git", "pull", "--ff-only", cwd=self.other)
         result = json.loads((self.other / "data/seen_jobs.json").read_text())
@@ -61,7 +62,7 @@ class GitStateRecoveryTests(unittest.TestCase):
     def test_failed_push_keeps_state_locally_and_exits_failure(self):
         (self.local / "data/seen_jobs.json").write_text('{"initial":"2026-07-21","failed_job":"2026-10-14"}')
         cmd("git", "remote", "set-url", "origin", str(self.remote) + "-does-not-exist", cwd=self.local)
-        p = cmd(sys.executable, str(SCRIPT), "staging/rehearsal", cwd=self.local, check=False)
+        p = cmd(sys.executable, str(SCRIPT), "main", cwd=self.local, check=False, ci=True)
         self.assertNotEqual(p.returncode, 0)
         result = json.loads((self.local / "data/seen_jobs.json").read_text())
         self.assertIn("failed_job", result)
@@ -69,13 +70,13 @@ class GitStateRecoveryTests(unittest.TestCase):
 
 class WorkflowConfigurationTests(unittest.TestCase):
     def test_notifications_follow_first_persist_step(self):
-        # Phase 4 supersedes the P0 send/persist order by removing BOTH stages.
         content = (SCRIPT.parent.parent / ".github/workflows/tracker.yml").read_text()
-        self.assertNotIn("id: deliver", content)
-        self.assertNotIn("id: persist_prepare", content)
-        self.assertNotIn("persist_state.py", content)
-        self.assertIn("run.py --dry-run", content)
-        self.assertNotIn("secrets.", content)
+        self.assertIn("run.py --prepare", content)
+        self.assertIn("scripts/persist_state.py main", content)
+        self.assertIn("if: steps.gate.outputs.enabled", content)
+        self.assertLess(content.index('run.py --prepare'), content.index('scripts/persist_state.py main'))
+        self.assertIn("python-version: \"3.11\"", content)
+        self.assertIn("retention-days: 30", content)
 
 
 if __name__ == "__main__":

@@ -267,7 +267,24 @@ class PipelineTests(unittest.TestCase):
         self.assertNotIn("li_987", run.load_seen())
         self.assertEqual(pending_count(run.load_outbox()), 0)
 
+    def test_initial_production_baseline_suppresses_historical_alerts(self):
+        example=j()
+        # No live network and no production state: all paths patched by setUp.
+        with patch.object(run, 'fetch_all_companies', return_value=[example,dict(example)]), \
+             patch.object(run, 'fetch_gradireland', return_value=[]), \
+             patch.object(run, 'fetch_jooble', return_value=[]), \
+             patch.object(run, 'fetch_adzuna', return_value=[]), \
+             patch.object(run, 'fetch_arbeitnow', return_value=[]), \
+             patch.object(run, 'fetch_remotive', return_value=[]), \
+             patch.object(run, 'fetch_remoteok', return_value=[]), \
+             patch.object(run, 'fetch_linkedin_sweep', return_value=[]):
+            self.assertEqual(run.prepare(),0)
+        self.assertEqual(set(run.load_seen()), {'test_1'})
+        self.assertTrue(run.load_discovery().get('baseline_initialized_at'))
+        self.assertEqual(pending_count(run.load_outbox()), 0)
+
     def test_duplicated_job_queued_once_and_seen(self):
+        run.save_discovery({"linkedin_last_sweep_at":"", "baseline_initialized_at":"2026-10-14T00:00:00+00:00"})
         example = j()
         with patch.object(run, "fetch_all_companies", return_value=[example, dict(example)]), \
              patch.object(run, "fetch_gradireland", return_value=[]), \

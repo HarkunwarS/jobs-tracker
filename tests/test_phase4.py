@@ -77,7 +77,7 @@ class GeographyCases(unittest.TestCase):
         self.assertIsNone(scope_of(job('Berlin, Germany','No visa sponsorship',sponsors_visa=True), CFG))
 
 
-class StagingSafety(unittest.TestCase):
+class RuntimeSafety(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -98,9 +98,18 @@ class StagingSafety(unittest.TestCase):
             prep.assert_not_called(); delivery.assert_not_called()
         self.assertEqual(before,[p.read_bytes() for p in self.paths])
 
-    def test_prepare_denied_no_state_change(self):
+    def test_production_prepare_requires_explicit_stage(self):
         before=[p.read_bytes() for p in self.paths]
-        with patch.object(run,'prepare',side_effect=AssertionError('unsafe')) as prep:
+        with patch.object(run,'prepare',return_value=0) as prep:
+            self.assertEqual(run.main(['--prepare']),0)
+            prep.assert_called_once()
+        self.assertEqual(before,[p.read_bytes() for p in self.paths])
+
+    def test_staging_prepare_still_denied(self):
+        before=[p.read_bytes() for p in self.paths]
+        staging_cfg=dict(CFG, runtime={'mode':'staging', 'dry_run':True})
+        with patch.object(run,'load_yaml',return_value=staging_cfg), \
+             patch.object(run,'prepare',side_effect=AssertionError('unsafe')) as prep:
             self.assertEqual(run.main(['--prepare']),3)
             prep.assert_not_called()
         self.assertEqual(before,[p.read_bytes() for p in self.paths])
@@ -118,11 +127,13 @@ class StagingSafety(unittest.TestCase):
             self.assertEqual(run.main([]),3)
             prep.assert_not_called();dl.assert_not_called()
 
-    def test_approval_disabled_default_config(self):
-        self.assertEqual(CFG['runtime']['mode'],'staging')
-        for c in approval.CHANNELS:
-            self.assertFalse(CFG['notifications'][c]['enabled'])
-            self.assertFalse(approval.approved(c,CFG))
+    def test_production_requires_signed_channel_grants(self):
+        self.assertEqual(CFG['runtime']['mode'],'production')
+        # A test's result must not depend on any secrets added to the CI environment.
+        with patch.dict(os.environ, {}, clear=True):
+            for c in approval.CHANNELS:
+                self.assertEqual(CFG['notifications'][c]['enabled'], c!='events_email')
+                self.assertFalse(approval.approved(c,CFG))
 
     def test_config_and_inputs_cannot_bypass(self):
         cfg=dict(CFG)
@@ -147,14 +158,20 @@ class StagingSafety(unittest.TestCase):
             self.assertEqual(events_run.main(),3)
             collect.assert_not_called();smtp.assert_not_called()
 
-    def test_staging_static_guard(self):
-        cmd=subprocess.run([sys.executable,str(ROOT/'scripts/staging_verify.py')],cwd=ROOT,capture_output=True,text=True)
+    def test_production_static_guard(self):
+        cmd=subprocess.run([sys.executable,str(ROOT/'scripts/production_verify.py')],cwd=ROOT,capture_output=True,text=True)
         self.assertEqual(cmd.returncode,0,cmd.stderr)
 
-    def test_mutating_persist_to_main_rejected(self):
-        cmd=subprocess.run([sys.executable,str(ROOT/'scripts/persist_state.py'),'main'],cwd=ROOT,capture_output=True,text=True)
+    def test_persistence_refused_without_trusted_actions_context(self):
+        # Never execute a state-push script with CI credentials inside the real checkout.
+        # Only verify its fail-closed guard with all privileged context removed.
+        env={k:v for k,v in os.environ.items()
+             if k not in ('GITHUB_ACTIONS','GITHUB_REPOSITORY','GITHUB_REF_NAME',
+                          'GITHUB_TOKEN','GH_TOKEN')}
+        cmd=subprocess.run([sys.executable,str(ROOT/'scripts/persist_state.py'),'main'],
+                           cwd=self.dir,env=env,capture_output=True,text=True)
         self.assertNotEqual(cmd.returncode,0)
-        self.assertIn('non-staging branch',cmd.stderr)
+        self.assertIn('outside production GitHub Actions',cmd.stderr)
 
     def test_signed_per_channel_approval_in_disposable_fixture(self):
         # No production keys/secret material: ephemeral key generated and discarded.
@@ -180,7 +197,10 @@ class StagingSafety(unittest.TestCase):
             self.assertTrue(approval.approved('email',cfg))
             self.assertFalse(approval.approved('telegram',cfg))
             self.assertFalse(approval.approved('events_email',cfg))
-            self.assertFalse(approval.approved('email',CFG))
+            self.assertTrue(approval.approved('email',CFG))
+            staging_cfg={'runtime':{'mode':'staging'},
+                         'notifications':{'email':{'enabled':True}}}
+            self.assertFalse(approval.approved('email',staging_cfg))
             broken=dict(doc, signature='00'*64)
             (self.dir/'approvals/email.json').write_text(json.dumps(broken))
             self.assertFalse(approval.approved('email',cfg))
