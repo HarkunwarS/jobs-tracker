@@ -1,4 +1,4 @@
-"""Offline test suite for Job Tracker v6 (no network needed)."""
+"""Offline legacy regression suite. Uses a TEMPORARY state path only."""
 import sys
 sys.path.insert(0, ".")
 
@@ -85,9 +85,10 @@ check("cat product_pm", category_of("Junior Project Manager") == "product_pm")
 
 # ── Scope logic ─────────────────────────────────────────────────────────────
 check("ireland scope", scope_of(J("Data Analyst", "Cork, Ireland"), cfg) == "ireland")
-check("belfast counts", scope_of(J("Data Analyst", "Belfast"), cfg) == "ireland")
+check("Belfast not Republic of Ireland", scope_of(J("Data Analyst", "Belfast"), cfg) is None)
 check("eu remote", scope_of(J("Data Analyst", "Remote — Europe"), cfg) == "eu_remote")
-check("remote anywhere", scope_of(J("Data Analyst", "Fully Remote"), cfg) == "remote")
+check("ambiguous fully remote not globally eligible", scope_of(J("Data Analyst", "Fully Remote"), cfg) is None)
+check("worldwide remote", scope_of(J("Data Analyst", "Remote Worldwide"), cfg) == "remote")
 check("visa w/ phrase", scope_of(
     J("Data Analyst", "London, UK", "We offer visa sponsorship to the right candidate"), cfg) == "visa")
 check("asia w/ phrase", scope_of(
@@ -148,16 +149,22 @@ check("ical parses 2 events", len(events) == 2)
 check("ical folded line", "continuation line" in events[1]["title"])
 check("ical location unescaped", events[0]["location"] == "Republic of Work, Cork")
 
-# ── seen-cache migration ────────────────────────────────────────────────────
-import json, importlib
+# ── seen-cache migration: temporary directory, NEVER user data ─────────────
+import json, tempfile
+from pathlib import Path
 import run as run_mod
-json.dump(["old_id_1", "old_id_2"], open("data/seen_jobs.json", "w"))
-seen = run_mod.load_seen()
-check("seen migrates v5 list", isinstance(seen, dict) and "old_id_1" in seen)
-run_mod.save_seen(seen)
-seen2 = run_mod.load_seen()
-check("seen roundtrips as dict", seen2 == seen)
-json.dump({}, open("data/seen_jobs.json", "w"))
+with tempfile.TemporaryDirectory(prefix="tracker-test-seen-") as temp_dir:
+    original_seen_file = run_mod.SEEN_FILE
+    try:
+        run_mod.SEEN_FILE = Path(temp_dir) / "seen_jobs.json"
+        run_mod.SEEN_FILE.write_text(json.dumps(["old_id_1", "old_id_2"]), encoding="utf-8")
+        seen = run_mod.load_seen()
+        check("seen migrates v5 list", isinstance(seen, dict) and "old_id_1" in seen)
+        run_mod.save_seen(seen)
+        seen2 = run_mod.load_seen()
+        check("seen roundtrips as dict", seen2 == seen)
+    finally:
+        run_mod.SEEN_FILE = original_seen_file
 
 print(f"\n{'='*40}\n  {PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)
