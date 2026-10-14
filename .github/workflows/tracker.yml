@@ -27,19 +27,6 @@ jobs:
           python test_v6.py
           python -m unittest discover -s tests -v
           python scripts/production_verify.py
-      - name: Snapshot pre-run state
-        run: |
-          mkdir -p .run_backup
-          for f in data/seen_jobs.json data/notification_outbox.json data/discovery_state.json; do
-            if [ -f "$f" ]; then cp "$f" .run_backup/; fi
-          done
-      - name: Upload pre-run backup
-        uses: actions/upload-artifact@v4
-        with:
-          name: pre-run-state-${{ github.run_id }}
-          path: .run_backup/
-          retention-days: 30
-          if-no-files-found: error
       - name: Fetch and queue newly discovered jobs
         id: prepare
         env:
