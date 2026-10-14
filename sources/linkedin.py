@@ -18,6 +18,7 @@ import re
 import time
 import urllib.parse
 from typing import Dict, List
+from datetime import datetime, timezone
 
 import requests
 from bs4 import BeautifulSoup
@@ -33,94 +34,124 @@ HEADERS = {
 }
 
 
-def _search_url(keyword: str, location: str, seconds: int) -> str:
+def _search_url(keyword: str, location: str, seconds: int, start: int = 0) -> str:
     params = {
         "keywords": keyword,
         "location": location,
         "f_TPR":    f"r{seconds}",
-        "start":    0,
+        "start":    start,
     }
     encoded = "&".join(f"{k}={urllib.parse.quote_plus(str(v))}" for k, v in params.items())
     return f"https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?{encoded}"
 
 
-def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200) -> List[Dict]:
-    """One search → list of job dicts. Returns [] on any failure."""
-    url = _search_url(keyword, location, seconds)
-    for attempt in range(2):
-        try:
-            r = requests.get(url, headers=HEADERS, timeout=15)
-            if r.status_code == 429:
-                if attempt == 0:
-                    time.sleep(30 + random.uniform(0, 10))
+def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
+                   pages: int = 2) -> List[Dict]:
+    """Search multiple public guest-result pages; deduplicate by LinkedIn ID.
+
+    Guest endpoint is not guaranteed to return all matching results, and
+    HTTP/429 responses are not proof of an empty jobs market.
+    """
+    out: List[Dict] = []
+    seen = set()
+    for page in range(max(1, pages)):
+        url = _search_url(keyword, location, seconds, start=page * 25)
+        for attempt in range(2):
+            try:
+                r = requests.get(url, headers=HEADERS, timeout=15)
+                if r.status_code == 429:
+                    if attempt == 0:
+                        time.sleep(30 + random.uniform(0, 10))
+                        continue
+                    print(f"  ⚠️  LinkedIn throttled: {keyword!r} @ {location}")
+                    return out
+                if r.status_code != 200:
+                    print(f"  ⚠️  LinkedIn HTTP {r.status_code}: {keyword!r} @ {location}")
+                    return out
+                break
+            except requests.RequestException as exc:
+                print(f"  ⚠️  LinkedIn request error: {type(exc).__name__}")
+                return out
+        else:
+            return out
+
+        soup = BeautifulSoup(r.text, "html.parser")
+        cards = soup.find_all("div", class_="base-card")
+        for card in cards:
+            try:
+                urn = card.get("data-entity-urn", "")
+                job_id = urn.split(":")[-1] if urn else ""
+                if not job_id or job_id in seen:
                     continue
-                return []
-            if r.status_code != 200:
-                return []
+                title_el = card.find("h3", class_="base-search-card__title")
+                company_el = card.find("h4", class_="base-search-card__subtitle")
+                loc_el = card.find("span", class_="job-search-card__location")
+                link_el = card.find("a", class_="base-card__full-link")
+                time_el = card.find("time")
+                title = title_el.get_text(strip=True) if title_el else ""
+                if not title:
+                    continue
+                seen.add(job_id)
+                out.append({
+                    "id": f"li_{job_id}", "li_job_id": job_id, "title": title,
+                    "company": company_el.get_text(strip=True) if company_el else "Unknown",
+                    "location": loc_el.get_text(strip=True) if loc_el else location,
+                    "link": link_el["href"].split("?")[0] if link_el and link_el.get("href") else url,
+                    "posted": (time_el.get("datetime", "") if time_el else "") or "Recent",
+                    "source": "LinkedIn", "description": "",
+                })
+            except (KeyError, AttributeError, ValueError):
+                continue
+        if len(cards) < 25:
             break
-        except Exception:
-            return []
-    else:
-        return []
-
-    soup = BeautifulSoup(r.text, "html.parser")
-    out = []
-    for card in soup.find_all("div", class_="base-card"):
-        try:
-            urn = card.get("data-entity-urn", "")
-            job_id = urn.split(":")[-1] if urn else ""
-            if not job_id:
-                continue
-            title_el   = card.find("h3", class_="base-search-card__title")
-            company_el = card.find("h4", class_="base-search-card__subtitle")
-            loc_el     = card.find("span", class_="job-search-card__location")
-            link_el    = card.find("a", class_="base-card__full-link")
-            time_el    = card.find("time")
-
-            title = title_el.get_text(strip=True) if title_el else ""
-            if not title:
-                continue
-            out.append({
-                "id":          f"li_{job_id}",
-                "li_job_id":   job_id,
-                "title":       title,
-                "company":     company_el.get_text(strip=True) if company_el else "Unknown",
-                "location":    loc_el.get_text(strip=True) if loc_el else location,
-                "link":        link_el["href"].split("?")[0] if link_el and link_el.get("href") else url,
-                "posted":      (time_el.get("datetime", "") if time_el else "") or "Recent",
-                "source":      "LinkedIn",
-                "description": "",
-            })
-        except Exception:
-            continue
     return out
 
 
+def lookback_hours(last_sweep: str | None, now: datetime | None = None,
+                   minimum: int = 96, maximum: int = 168) -> int:
+    """Cover weekdays, 2+ day weekend gaps and delayed Actions schedules.
+
+    Always overlap previous sweeps for recovery; the seen-cache removes repeats.
+    Cap at seven days because LinkedIn guest date filters may reject larger spans.
+    """
+    now = now or datetime.now(timezone.utc)
+    if not last_sweep:
+        return minimum
+    try:
+        last = datetime.fromisoformat(last_sweep.replace("Z", "+00:00"))
+        if last.tzinfo is None:
+            raise ValueError("naive timestamp")
+        elapsed = max(0.0, (now - last).total_seconds() / 3600.0)
+    except ValueError:
+        return maximum
+    if elapsed > maximum:
+        print(f"  ⚠️  LinkedIn sweep gap {elapsed:.0f}h exceeds max {maximum}h; complete backfill unverified")
+    return min(maximum, max(minimum, int(elapsed + 24.99)))
+
+
 def fetch_linkedin_sweep(
-    ireland_keywords: List[str],
-    abroad_keywords: List[str],
-    abroad_locations: List[str],
-    window_hours: int = 3,
-    sleep_between: tuple = (2.5, 5.0),
+    ireland_keywords: List[str], abroad_keywords: List[str],
+    abroad_locations: List[str], window_hours: int = 96,
+    sleep_between: tuple = (2.5, 5.0), pages_per_search: int = 2,
 ) -> List[Dict]:
-    """
-    Full sweep: every keyword for Ireland, a short keyword list for the
-    abroad locations. window_hours should exceed the run cadence so a
-    delayed or skipped GitHub Actions run can't open a gap.
-    """
+    """Overlapping 4–7 day discovery with in-run ID deduplication."""
     seconds = window_hours * 3600
     searches = [(kw, "Ireland") for kw in ireland_keywords]
     searches += [(kw, loc) for loc in abroad_locations for kw in abroad_keywords]
-
     all_jobs: List[Dict] = []
-    print(f"  → LinkedIn: {len(searches)} searches "
-          f"({len(ireland_keywords)} Ireland + {len(abroad_keywords)}×{len(abroad_locations)} abroad)")
+    seen_ids = set()
+    print(f"  → LinkedIn: {len(searches)} searches, {window_hours}h lookback, "
+          f"up to {pages_per_search} pages per query")
     for kw, loc in searches:
-        jobs = fetch_linkedin(kw, loc, seconds=seconds)
+        jobs = fetch_linkedin(kw, loc, seconds=seconds, pages=pages_per_search)
         if jobs:
-            print(f"    ✓ '{kw}' @ {loc}: {len(jobs)}")
-        all_jobs.extend(jobs)
-        time.sleep(random.uniform(*sleep_between))
+            print(f"    ✓ {kw!r} @ {loc}: {len(jobs)}")
+        for job in jobs:
+            if job["id"] not in seen_ids:
+                seen_ids.add(job["id"])
+                all_jobs.append(job)
+        if sleep_between[1] > 0:
+            time.sleep(random.uniform(*sleep_between))
     return all_jobs
 
 

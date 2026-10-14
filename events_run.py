@@ -21,6 +21,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 from sources.events import collect_events
+from sources.approval import approved
 from sources.notify import _html_escape  # reuse the escaper
 
 
@@ -59,6 +60,10 @@ def main() -> int:
     print(f"\n🤝 Events digest — {datetime.now():%Y-%m-%d %H:%M}")
     with open("config.yaml") as f:
         cfg = yaml.safe_load(f) or {}
+
+    if not approved('events_email', cfg):
+        print('DENIED: events notification requires separate operator-signed approval')
+        return 3
 
     events = collect_events(cfg)
     print(f"  {len(events)} events collected")
