@@ -247,6 +247,7 @@ class PipelineTests(unittest.TestCase):
             p = patch.object(run, name, value)
             p.start(); self.addCleanup(p.stop)
         cfg = yaml.safe_load(Path("config.yaml").read_text())
+        cfg["catalogue"] = {"enabled": False}  # New network layer has its own mocked tests.
         cfg["scoring"]["cv_text_file"] = str(Path(self.temp.name)/"missing_cv.txt")
         p = patch.object(run, "load_yaml", side_effect=lambda p: cfg)
         p.start(); self.addCleanup(p.stop)

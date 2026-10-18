@@ -19,6 +19,10 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 from sources.ats import fetch_all_companies
+from sources.coverage import tracked
+from sources.direct import fetch_direct_sites
+from sources.discovery_store import refresh as refresh_catalogue
+import json
 from sources.aggregators import fetch_adzuna, fetch_arbeitnow, fetch_jooble, fetch_remoteok, fetch_remotive
 from sources.gradboards import fetch_gradireland
 from sources.linkedin import enrich_descriptions, fetch_linkedin_sweep, lookback_hours
@@ -98,7 +102,7 @@ def prepare() -> int:
     print("\n🌐 ATS & company career sites…")
     all_jobs += fetch_all_companies(companies)
     print("\n🎓 Graduate boards…")
-    all_jobs += fetch_gradireland(pages=int(cfg.get("gradireland", {}).get("pages", 3)))
+    all_jobs += tracked("gradireland", lambda: fetch_gradireland(pages=int(cfg.get("gradireland", {}).get("pages", 0))))
     print("\n📦 Aggregators…")
     if agg_cfg.get("jooble", True):
         all_jobs += fetch_jooble(kw_cfg.get("aggregator_queries", ["graduate"]), location="Ireland")
@@ -125,14 +129,22 @@ def prepare() -> int:
         pages_per_search=int(li_cfg.get("pages_per_search", 2)),
     )
 
+    suppressed_ids = set()
+    if cfg.get("catalogue", {}).get("enabled", False):
+        registry_path = Path(cfg["catalogue"].get("registry", "source_registry.json"))
+        if registry_path.exists():
+            all_jobs += fetch_direct_sites(json.loads(registry_path.read_text()))
+        all_jobs, suppressed_ids = refresh_catalogue(all_jobs, outbox, cfg)
     all_jobs = unique_by_id(all_jobs)
     if not all_jobs and not discovery.get("baseline_initialized_at"):
         print("  ❌ Initial baseline aborted: no jobs returned by any source; no state was changed")
         return 2
-    fresh = [job for job in all_jobs if job["id"] not in seen]
+    fresh = [job for job in all_jobs if job["id"] not in seen and job["id"] not in suppressed_ids]
     print(f"\n📥 {len(fresh)} fresh unique IDs (of {len(all_jobs)} fetched unique IDs)")
 
     kept, unverified, counters = filter_jobs(fresh, cfg)
+    if cfg.get("catalogue", {}).get("enabled", False):
+        kept = [j for j in kept if j.get("verification_status") == "open" and not j.get("eligibility", {}).get("restriction_flag")]
     li_unverified = [job for job in unverified if job.get("li_job_id")]
     if li_unverified:
         print(f"\n🔎 {len(li_unverified)} LinkedIn sponsorship candidates need descriptions…")

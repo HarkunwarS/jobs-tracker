@@ -69,7 +69,10 @@ def fetch_jooble(keywords: List[str], location: str = "Ireland") -> List[Dict]:
                 "company":     j.get("company", "") or "Unknown",
                 "location":    j.get("location", "") or location,
                 "link":        j.get("link", ""),
-                "posted":      (j.get("updated", "") or "")[:10] or "Recent",
+                "posted":      None,
+                "updated_at": j.get("updated"),
+                "posted_kind": "updated",
+                "country": "IE" if location == "Ireland" else None,
                 "source":      "Jooble",
                 "description": _strip_html(j.get("snippet", "")),
             })
@@ -153,7 +156,7 @@ def fetch_arbeitnow(visa_only: bool = True, pages: int = 3) -> List[Dict]:
                 "posted":        "Recent",
                 "source":        "Arbeitnow",
                 "description":   _strip_html(j.get("description", "")),
-                "sponsors_visa": bool(j.get("visa_sponsorship", visa_only)),
+                "sponsors_visa": j.get("visa_sponsorship") is True,
             })
     print(f"  ✓ Arbeitnow (visa-sponsor jobs): {len(out)}")
     return out
@@ -161,9 +164,9 @@ def fetch_arbeitnow(visa_only: bool = True, pages: int = 3) -> List[Dict]:
 
 # ── Remotive (remote) ───────────────────────────────────────────────────────
 
-def fetch_remotive(limit: int = 100) -> List[Dict]:
+def fetch_remotive(limit: int = 0) -> List[Dict]:
     try:
-        r = requests.get(f"https://remotive.com/api/remote-jobs?limit={limit}",
+        r = requests.get("https://remotive.com/api/remote-jobs" + (f"?limit={limit}" if limit else ""),
                          headers=HEADERS, timeout=TIMEOUT)
         if r.status_code != 200:
             return []
