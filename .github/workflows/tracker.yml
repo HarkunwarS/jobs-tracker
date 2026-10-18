@@ -1,8 +1,7 @@
-name: Ireland Job Tracker — Production Discovery
+name: Ireland Job Tracker v7
 on:
   schedule:
-    - cron: "0 0,8,17 * * *"
-      timezone: "Europe/Dublin"
+    - cron: "7 * * * *"
   workflow_dispatch:
 permissions:
   contents: write
@@ -51,13 +50,10 @@ jobs:
           retention-days: 30
       - name: Commit state before any delivery
         run: python scripts/persist_state.py main
-      - name: Check signed channel grants and available credentials
+      - name: Check delivery channels and credentials
         id: gate
         if: steps.prepare.outputs.bootstrapped != 'true'
         env:
-          NOTIFICATION_APPROVAL_PUBLIC_KEY_B64: ${{ secrets.NOTIFICATION_APPROVAL_PUBLIC_KEY_B64 }}
-          EMAIL_APPROVAL_GRANT_B64: ${{ secrets.EMAIL_APPROVAL_GRANT_B64 }}
-          TELEGRAM_APPROVAL_GRANT_B64: ${{ secrets.TELEGRAM_APPROVAL_GRANT_B64 }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
@@ -67,9 +63,6 @@ jobs:
       - name: Deliver bounded queued alerts
         if: steps.gate.outputs.enabled == 'true'
         env:
-          NOTIFICATION_APPROVAL_PUBLIC_KEY_B64: ${{ secrets.NOTIFICATION_APPROVAL_PUBLIC_KEY_B64 }}
-          EMAIL_APPROVAL_GRANT_B64: ${{ secrets.EMAIL_APPROVAL_GRANT_B64 }}
-          TELEGRAM_APPROVAL_GRANT_B64: ${{ secrets.TELEGRAM_APPROVAL_GRANT_B64 }}
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENT: ${{ secrets.EMAIL_RECIPIENT }}
