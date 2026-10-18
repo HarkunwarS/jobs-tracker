@@ -1,15 +1,25 @@
-"""Release delivery only with valid signed standing grants and configured secrets."""
+"""Decide which channels can deliver. Fail the run LOUDLY if none can, so GitHub emails you."""
 from pathlib import Path
-import os, yaml
+import os, sys, yaml
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sources.approval import approved
-root=Path(__file__).resolve().parents[1]
-cfg=yaml.safe_load((root/'config.yaml').read_text())
-channels=[]
-if approved('email',cfg) and all(os.getenv(k) for k in ('EMAIL_SENDER','EMAIL_PASSWORD','EMAIL_RECIPIENT')):
-    channels.append('email')
-if approved('telegram',cfg) and all(os.getenv(k) for k in ('TELEGRAM_BOT_TOKEN','TELEGRAM_CHAT_ID')):
-    channels.append('telegram')
+root = Path(__file__).resolve().parents[1]
+cfg = yaml.safe_load((root / 'config.yaml').read_text())
+need = {'email': ('EMAIL_SENDER', 'EMAIL_PASSWORD', 'EMAIL_RECIPIENT'),
+        'telegram': ('TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID')}
+channels = []
+for name, keys in need.items():
+    missing = [k for k in keys if not os.getenv(k)]
+    if not approved(name, cfg):
+        print(f'::warning::{name} disabled in config.yaml')
+    elif missing:
+        print(f'::warning::{name} enabled but secrets missing: {", ".join(missing)}')
+    else:
+        channels.append(name)
 if os.getenv('GITHUB_OUTPUT'):
-    with open(os.environ['GITHUB_OUTPUT'],'a',encoding='utf-8') as f:
-        f.write('enabled='+('true' if channels else 'false')+'\n')
-print('Approved delivery transports: '+(', '.join(channels) if channels else 'none; no send'))
+    with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+        f.write('enabled=' + ('true' if channels else 'false') + '\n')
+print('Delivery channels: ' + (', '.join(channels) if channels else 'NONE'))
+if not channels:
+    print('::error::No notification channel can send. Alerts are NOT being delivered.')
+    sys.exit(1)
