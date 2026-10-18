@@ -80,9 +80,10 @@ class DiscoveryUpgradeTests(unittest.TestCase):
     def test_lever_milliseconds(self):
         with patch("sources.ats._safe_get",return_value=response([{"id":"1","createdAt":0}])):
             self.assertTrue(fetch_lever("Example","example")[0]["posted"].startswith("1970-01-01"))
-    def test_irrelevant_engineering_not_retained(self):
-        c=empty_catalogue();update_catalogue(c,[job(title="Graduate Rail Engineer")],CFG)
-        self.assertFalse(c["jobs"])
+    def test_no_role_allowlist_in_catalogue(self):
+        # v7: recall first. Non-tech titles are retained (they rank last in delivery).
+        c=empty_catalogue();update_catalogue(c,[job(title="Graduate Rail Engineer"),job(id="two",link="https://example.com/jobs/2",title="Supply Chain Graduate")],CFG)
+        self.assertEqual(len(c["jobs"]),2)
     def test_duplicate_first_page_does_not_skip_later_query_pages(self):
         pages=[response({"jobs":[{"id":"a"}],"totalCount":1}),
                response({"jobs":[{"id":"a"}],"totalCount":2}),

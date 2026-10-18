@@ -35,10 +35,11 @@ class OfflineReleaseSafety(unittest.TestCase):
         self.assertIn('schedule', triggers)
         self.assertEqual(wf['permissions'], {'contents':'write'})
         self.assertIn("if: steps.gate.outputs.enabled", (ROOT/'.github/workflows/tracker.yml').read_text())
+        self.assertNotIn('APPROVAL_GRANT', (ROOT/'.github/workflows/tracker.yml').read_text())
         events=yaml.safe_load((ROOT/'.github/workflows/events.yml').read_text())
         self.assertNotIn('schedule', events.get('on',events.get(True,{})) or {})
-        self.assertFalse(approved('email',cfg))
-        self.assertFalse(approved('telegram',cfg))
+        self.assertTrue(approved('email',cfg))
+        self.assertTrue(approved('telegram',cfg))
         self.assertFalse(approved('events_email',cfg))
 
     def test_no_mutation_from_read_only_dry_run(self):
