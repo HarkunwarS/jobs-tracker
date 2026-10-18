@@ -1,7 +1,8 @@
 name: Ireland Job Tracker — Production Discovery
 on:
   schedule:
-    - cron: "17 8,14,20 * * *"
+    - cron: "0 0,8,17 * * *"
+      timezone: "Europe/Dublin"
   workflow_dispatch:
 permissions:
   contents: write
@@ -43,6 +44,10 @@ jobs:
             data/seen_jobs.json
             data/notification_outbox.json
             data/discovery_state.json
+            data/vacancies.json
+            data/vacancies.csv
+            data/discovery_report.json
+            data/applications.json
           retention-days: 30
       - name: Commit state before any delivery
         run: python scripts/persist_state.py main

@@ -100,7 +100,7 @@ def geography(job):
     loc = " ".join(str(job.get(k) or "") for k in ("country", "location"))
     if re.search(r"northern ireland|belfast|londonderry", loc, re.I):
         return 2
-    if job.get("scope") == "ireland" or re.search(r"\bireland\b|\bIRL\b|^IE$", loc, re.I):
+    if job.get("scope") == "ireland" or str(job.get("country", "")).upper() in ("IE", "IRL") or re.search(r"\bireland\b|\bIRL\b", loc, re.I):
         return 1
     if re.search(r"uk|united kingdom|england|scotland|wales|europe|germany|netherlands|france|spain|poland|sweden|switzerland|denmark|finland|portugal|austria|belgium|norway", loc, re.I):
         return 2
@@ -133,6 +133,7 @@ def rank(job, today=None):
         if job.get("posted_kind") != "updated" and 0 <= age <= 14: score += 5
     except (ValueError,TypeError): pass
     issues = []
+    if job.get("verification_status") != "open": issues.append("Vacancy not currently verified open")
     if not text: issues.append("Full job description not verified")
     if minimum and minimum > 1: issues.append(f"Experience wording includes {minimum}+ years; review mandatory/preferred context")
     graduation = re.search(r"(?:graduating in|graduate in|graduation (?:date|year)|class of).{0,15}\b(202[7-9])\b", text, re.I)
@@ -145,7 +146,7 @@ def rank(job, today=None):
     priority = "High Priority" if early and len(skills)>=2 else "Good Match"
     if minimum and minimum >=3: priority="Stretch Opportunity"
     if issues: priority="Eligibility Check Required"
-    if days is not None and days < 0: priority="Closed"
+    if days is not None and days < 0 or job.get("verification_status") in ("closed","closed_deadline","unavailable"): priority="Closed"
     if days is not None and 0<=days<=3 and not issues and job.get("verification_status") == "open": priority="Apply Now"
     return {"priority":priority,"rank_score":max(0,min(score,100)),"geographic_priority":geo,
             "matched_skills":skills,"skills_not_evidenced":gaps,"review_flags":issues,
@@ -206,6 +207,9 @@ def update_catalogue(catalogue, jobs, cfg, timestamp=None):
         touched.add(key)
     groups={}
     for key,j in catalogue["jobs"].items():
+        if j.get("deadline") and str(j["deadline"])[:10] < stamp[:10]:
+            j["verification_status"]="closed_deadline"
+        j.update(rank(j, date.fromisoformat(stamp[:10])))
         fingerprint=(normal(j.get("company")),normal(j.get("title")),normal(j.get("location")))
         groups.setdefault(fingerprint,[]).append(key)
         j["possible_duplicate_ids"]=[]

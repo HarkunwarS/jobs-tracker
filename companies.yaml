@@ -192,7 +192,7 @@ workday_tenants:
   MSD:               [merck,            3, SearchJobs]
   Medtronic:         [medtronic,        5, External]
   Boston Scientific: [bostonscientific, 3, External]
-  Stryker:           [stryker,          1, Stryker_Careers]
+  Stryker:           [stryker,          1, StrykerCareers]
   Abbvie:            [abbvie,           5, External]
   EY:                [ey,               3, EY_Careers]
   Deloitte:          [deloitte,         3, Deloitte_Careers]

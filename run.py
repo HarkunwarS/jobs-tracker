@@ -105,16 +105,16 @@ def prepare() -> int:
     all_jobs += tracked("gradireland", lambda: fetch_gradireland(pages=int(cfg.get("gradireland", {}).get("pages", 0))))
     print("\n📦 Aggregators…")
     if agg_cfg.get("jooble", True):
-        all_jobs += fetch_jooble(kw_cfg.get("aggregator_queries", ["graduate"]), location="Ireland")
+        all_jobs += tracked("aggregator:Jooble", lambda: fetch_jooble(kw_cfg.get("aggregator_queries", ["graduate"]), location="Ireland"))
     if agg_cfg.get("adzuna", True):
-        all_jobs += fetch_adzuna(kw_cfg.get("aggregator_queries", ["graduate"]),
-                                 countries=agg_cfg.get("adzuna_countries", ["gb"]))
+        all_jobs += tracked("aggregator:Adzuna", lambda: fetch_adzuna(kw_cfg.get("aggregator_queries", ["graduate"]),
+                                 countries=agg_cfg.get("adzuna_countries", ["gb"])))
     if agg_cfg.get("arbeitnow", True):
-        all_jobs += fetch_arbeitnow(visa_only=True)
+        all_jobs += tracked("aggregator:Arbeitnow", lambda: fetch_arbeitnow(visa_only=True, pages=0))
     if agg_cfg.get("remotive", True):
-        all_jobs += fetch_remotive()
+        all_jobs += tracked("aggregator:Remotive", fetch_remotive)
     if agg_cfg.get("remoteok", True):
-        all_jobs += fetch_remoteok()
+        all_jobs += tracked("aggregator:RemoteOK", fetch_remoteok)
 
     minimum_hours = max(96, int(li_cfg.get("window_hours", 96)))
     maximum_hours = max(minimum_hours, int(li_cfg.get("maximum_window_hours", 168)))
@@ -143,9 +143,6 @@ def prepare() -> int:
     print(f"\n📥 {len(fresh)} fresh unique IDs (of {len(all_jobs)} fetched unique IDs)")
 
     kept, unverified, counters = filter_jobs(fresh, cfg)
-    if cfg.get("catalogue", {}).get("enabled", False):
-        from sources.catalogue import ROLE
-        kept = [j for j in kept if ROLE.search(j.get("title","")) and j.get("verification_status") == "open" and not j.get("eligibility", {}).get("restriction_flag")]
     li_unverified = [job for job in unverified if job.get("li_job_id")]
     if li_unverified:
         print(f"\n🔎 {len(li_unverified)} LinkedIn sponsorship candidates need descriptions…")
@@ -157,6 +154,10 @@ def prepare() -> int:
                 kept.append(job)
                 counters["kept"] += 1
 
+    if cfg.get("catalogue", {}).get("enabled", False):
+        from sources.catalogue import ROLE, eligibility
+        kept = [j for j in kept if ROLE.search(j.get("title","")) and j.get("verification_status") == "open" and not eligibility(j)["restriction_flag"]]
+        counters["kept"] = len(kept)
     print(f"\n📊 Filters: kept {counters['kept']} · senior {counters['senior']} · "
           f"sector {counters['sector']} · out-of-scope {counters['out_of_scope']} · "
           f"sponsorship-unverified {counters['unverified']}")
@@ -242,6 +243,11 @@ def deliver() -> int:
             if record.get("verification_status") != "open" or record.get("eligibility",{}).get("restriction_flag"):
                 return False
             if record.get("stale_review_required",True): return False
+            try:
+                checked = datetime.fromisoformat(record["date_last_verified"].replace("Z","+00:00"))
+                if (now - checked).total_seconds() > 7 * 86400: return False
+                if record.get("deadline") and str(record["deadline"])[:10] < now.date().isoformat(): return False
+            except (ValueError, TypeError, KeyError): return False
         return not baseline_at or str(entry.get('created_at','')) >= baseline_at
     email_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
                  if approved('email', cfg) and eligible_for_delivery(entry) and due(entry, "email", now)][:email_batch_cap]

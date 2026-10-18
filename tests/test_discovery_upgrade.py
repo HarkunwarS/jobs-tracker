@@ -1,4 +1,5 @@
 import unittest
+import os
 from unittest.mock import patch
 from types import SimpleNamespace
 from datetime import date
@@ -6,7 +7,7 @@ from sources.catalogue import (canonical_url,empty_catalogue,update_catalogue,
                                eligibility,rank,set_status)
 from sources.verification import verify,schema_fields
 from sources.ats import fetch_smartrecruiters,fetch_workday,fetch_ashby,fetch_lever
-from sources.aggregators import fetch_arbeitnow
+from sources.aggregators import fetch_arbeitnow,fetch_jooble,fetch_adzuna
 
 CFG={"locations":{"ireland":True},"filtering":{"international_candidates":True}}
 def job(**kw):
@@ -82,5 +83,36 @@ class DiscoveryUpgradeTests(unittest.TestCase):
     def test_irrelevant_engineering_not_retained(self):
         c=empty_catalogue();update_catalogue(c,[job(title="Graduate Rail Engineer")],CFG)
         self.assertFalse(c["jobs"])
+    def test_duplicate_first_page_does_not_skip_later_query_pages(self):
+        pages=[response({"jobs":[{"id":"a"}],"totalCount":1}),
+               response({"jobs":[{"id":"a"}],"totalCount":2}),
+               response({"jobs":[{"id":"b"}],"totalCount":2})]
+        with patch.dict(os.environ,{"JOOBLE_API_KEY":"test"}), patch("sources.aggregators.requests.post",side_effect=pages):
+            self.assertEqual({j["id"] for j in fetch_jooble(["graduate","junior"])},{"jo_a","jo_b"})
+    def test_adzuna_query_overlap_does_not_stop_pagination(self):
+        pages=[response({"results":[{"id":"a"}],"count":1}),
+               response({"results":[{"id":"a"}],"count":51}),
+               response({"results":[{"id":"b"}],"count":51})]
+        with patch.dict(os.environ,{"ADZUNA_APP_ID":"test","ADZUNA_APP_KEY":"test"}), patch("sources.aggregators.requests.get",side_effect=pages):
+            self.assertEqual({j["id"] for j in fetch_adzuna(["graduate","junior"],["gb"])},{"az_gb_a","az_gb_b"})
+    def test_workday_cannot_apply_is_closed(self):
+        j=job(link="https://example.wd1.myworkdayjobs.com/External/job/one")
+        result=verify(j,get=lambda *a,**k:response({"jobPostingInfo":{"canApply":False}}))
+        self.assertEqual(result["verification_status"],"closed")
+    def test_workday_detail_verifies_description(self):
+        j=job(link="https://example.wd1.myworkdayjobs.com/External/job/one")
+        result=verify(j,get=lambda *a,**k:response({"jobPostingInfo":{"title":j["title"],"jobDescription":"Python SQL","canApply":True}}))
+        self.assertEqual(result["verification_status"],"open")
+        self.assertEqual(result["description"],"Python SQL")
+    def test_untouched_catalogue_deadline_expires(self):
+        c=empty_catalogue();update_catalogue(c,[job(deadline="2026-10-20",verification_status="open")],CFG,"2026-10-18T00:00:00Z")
+        update_catalogue(c,[],CFG,"2026-10-21T00:00:00Z")
+        item=next(iter(c["jobs"].values()))
+        self.assertEqual(item["verification_status"],"closed_deadline")
+        self.assertEqual(item["priority"],"Closed")
+    def test_ie_country_code_and_unverified_priority(self):
+        r=rank(job(country="IE",location="Cork",verification_status="unverified"))
+        self.assertEqual(r["geographic_priority"],1)
+        self.assertEqual(r["priority"],"Eligibility Check Required")
 
 if __name__=="__main__":unittest.main()

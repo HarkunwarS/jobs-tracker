@@ -153,7 +153,7 @@ keywords:
 linkedin:
   window_hours: 96         # minimum 4d overlap handles nights/weekends/delays
   maximum_window_hours: 168 # adaptive lookback cap: one week
-  pages_per_search: 2     # fetch pages 0 and 1 when available
+  pages_per_search: 0     # paginate until exhausted, repeated, blocked or time budget
   detail_fetch_cap: 15     # max description fetches per run (visa candidates)
   abroad_locations:
     - United Kingdom

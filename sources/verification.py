@@ -6,6 +6,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from urllib.parse import urlsplit, urljoin
+from difflib import SequenceMatcher
 import requests
 from bs4 import BeautifulSoup
 from sources.catalogue import plain, now, rank, canonical_url
@@ -64,6 +65,44 @@ def public_url(url):
             r"^(?:localhost|127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.)",host)
     except ValueError:return False
 
+def detail_url(job):
+    """Use only observed public ATS detail routes on known ATS hosts."""
+    url=job.get("detail_api","")
+    if url and public_url(url) and (urlsplit(url).hostname or "").endswith((".myworkdayjobs.com",".smartrecruiters.com")):
+        return url
+    parts=urlsplit(job.get("link", ""))
+    if (parts.hostname or "").endswith(".myworkdayjobs.com"):
+        pieces=parts.path.strip("/").split("/")
+        if "job" in pieces:
+            index=pieces.index("job")
+            if index:
+                tenant=parts.hostname.split(".")[0]
+                board=pieces[index-1]
+                return f"https://{parts.hostname}/wday/cxs/{tenant}/{board}/"+"/".join(pieces[index:])
+    return ""
+
+def ats_detail(job,get):
+    url=detail_url(job)
+    if not url:return None
+    response=get(url,headers=HEADERS,timeout=15)
+    if response.status_code!=200:return None
+    try:data=response.json()
+    except (ValueError,TypeError):return None
+    info=data.get("jobPostingInfo")
+    if isinstance(info,dict) and info.get("canApply") is False:
+        return {"verification_status":"closed", "detail_evidence_url":url,
+                "verification_evidence":"ATS explicitly reports canApply=false"}
+    if isinstance(info,dict) and info.get("title") and info.get("jobDescription") and info.get("canApply") is not False:
+        return {"title":info["title"],"description":plain(info["jobDescription"]),
+                "location":info.get("location",job.get("location")),"posted":info.get("startDate"),
+                "posted_kind":"published","requisition_id":info.get("jobReqId"),
+                "employment_type":info.get("timeType"),"detail_evidence_url":url}
+    if data.get("name") and data.get("jobAd"):
+        sections=data["jobAd"].get("sections",{})
+        description=" ".join(plain(x.get("text")) for x in sections.values() if isinstance(x,dict))
+        if description:return {"title":data["name"],"description":description,"detail_evidence_url":url}
+    return None
+
 def verify(job, get=None):
     result=dict(job)
     url=job.get("link","")
@@ -71,6 +110,17 @@ def verify(job, get=None):
     if not public_url(url):
         result["verification_status"]="invalid_url";return result
     try:
+        detail=ats_detail(job,get or requests.get)
+        if detail and detail.get("verification_status")=="closed":
+            result.update(detail,date_last_verified=now())
+            result.update(rank(result))
+            return result
+        if detail:
+            result.update({k:v for k,v in detail.items() if v not in (None,"",[],{})})
+            result.update(verification_status="open",date_last_verified=now(),verification_evidence="Live public ATS vacancy detail with title and description")
+            if result.get("deadline") and str(result["deadline"])[:10] < date.today().isoformat(): result["verification_status"]="closed_deadline"
+            result.update(rank(result))
+            return result
         response=(get or requests.get)(url,headers=HEADERS,timeout=15)
         result["http_status"]=response.status_code
         if response.status_code in (404,410):
@@ -89,7 +139,8 @@ def verify(job, get=None):
             result.update(verification_status="closed",date_last_verified=now(),verification_evidence="Explicit vacancy closure text")
             return result
         # Only one JobPosting is safe to associate with this vacancy URL.
-        if len(schemas)==1:
+        title_match = len(schemas)==1 and SequenceMatcher(None,plain(schemas[0].get("title")).lower(),plain(job.get("title")).lower()).ratio() >= .55
+        if title_match:
             result.update(schema_fields(schemas[0]))
             result.update(verification_status="open",date_last_verified=now(),verification_evidence="JobPosting structured data on vacancy detail page")
         else:

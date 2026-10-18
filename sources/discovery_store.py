@@ -25,6 +25,17 @@ def refresh(jobs,outbox,cfg):
     prior={a:j for j in catalogue["jobs"].values() for a in j.get("aliases",[])}
     candidates=[]
     candidate_ids=set()
+    fetched_aliases={a for job in jobs for a in identities(job)}
+    historical_checks=[]
+    for old in catalogue["jobs"].values():
+        if any(a in fetched_aliases for a in old.get("aliases",[])):continue
+        if old.get("verification_status") in ("closed","closed_deadline"):continue
+        try:
+            attempted=datetime.fromisoformat((old.get("verification_attempted_at") or old.get("date_last_verified") or "").replace("Z","+00:00"))
+            stale=attempted < datetime.now(timezone.utc)-timedelta(days=7)
+        except (ValueError,TypeError):stale=True
+        if stale and old.get("id"):
+            historical_checks.append(dict(old))
     for job in jobs:
         if not ROLE.search(job.get("title", "")) or seniority_of(job.get("title", ""),job.get("description", ""))=="senior":continue
         if scope_of(job,cfg) is None and job.get("source")!="gradireland":continue
@@ -37,6 +48,7 @@ def refresh(jobs,outbox,cfg):
             job.update({k:v for k,v in old.items() if k not in ("id","aliases","sources","last_seen_at") and v not in (None,"",[],{})})
         elif job["id"] not in candidate_ids:
             candidates.append(job); candidate_ids.add(job["id"])
+    candidates += [j for j in historical_checks if j["id"] not in candidate_ids]
     candidates.sort(key=lambda j:(geography(j),-rank(j)["rank_score"]))
     verified=verify_candidates(candidates,budget_seconds=cfg.get("catalogue",{}).get("verification_seconds",300))
     updates={j["id"]:j for j in verified}
@@ -49,7 +61,8 @@ def refresh(jobs,outbox,cfg):
         if any(k in known for k in keys):suppressed.add(job["id"])
         if any(k in aliases for k in keys):merged_count+=1;continue
         aliases.update(keys);unique.append(job)
-    counts=update_catalogue(catalogue,jobs,cfg)
+    historical_updates=[updates[j["id"]] for j in historical_checks if j["id"] in updates]
+    counts=update_catalogue(catalogue,jobs+historical_updates,cfg)
     save_json(CATALOGUE,catalogue,validate_catalogue)
     records=list(catalogue["jobs"].values())
     report={"at":now(),"raw_jobs":len(jobs),"unique_jobs":len(unique),"strong_duplicates":merged_count,
@@ -58,6 +71,10 @@ def refresh(jobs,outbox,cfg):
             "geography":dict(Counter(str(j.get("geographic_priority")) for j in records)),
             "priority":dict(Counter(j.get("priority","unknown") for j in records)),
             "sources":reports(reset=True),
+            "historical_rechecks":len(historical_updates),
+            "verified_open_ireland":sum(j.get("geographic_priority")==1 and j.get("verification_status")=="open" for j in records),
+            "possible_duplicate_records":sum(bool(j.get("possible_duplicate_ids")) for j in records),
+            "stale_review_records":sum(j.get("stale_review_required",True) for j in records),
             "limitations":["Unknown work permission requires candidate confirmation",
                 "Search portals and failed ATS endpoints are not counted as automated coverage",
                 "HTTP 200 is not sufficient to verify a vacancy",
