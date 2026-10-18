@@ -187,7 +187,7 @@ workday_tenants:
   Ryanair:           [ryanair,          3, External]
   Glanbia:           [glanbia,          3, External]
   Kerry Group:       [kerry,            3, External]
-  Pfizer:            [pfizer,           3, PfizerCareers]
+  Pfizer:            [pfizer,           1, PfizerCareers]
   J&J:               [jnj,              3, jnjcareers]
   MSD:               [merck,            3, SearchJobs]
   Medtronic:         [medtronic,        5, External]

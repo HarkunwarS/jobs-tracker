@@ -144,7 +144,8 @@ def prepare() -> int:
 
     kept, unverified, counters = filter_jobs(fresh, cfg)
     if cfg.get("catalogue", {}).get("enabled", False):
-        kept = [j for j in kept if j.get("verification_status") == "open" and not j.get("eligibility", {}).get("restriction_flag")]
+        from sources.catalogue import ROLE
+        kept = [j for j in kept if ROLE.search(j.get("title","")) and j.get("verification_status") == "open" and not j.get("eligibility", {}).get("restriction_flag")]
     li_unverified = [job for job in unverified if job.get("li_job_id")]
     if li_unverified:
         print(f"\n🔎 {len(li_unverified)} LinkedIn sponsorship candidates need descriptions…")
@@ -198,6 +199,8 @@ def prepare() -> int:
                   if scope_of(job, cfg) in ("visa_unverified", "eligibility_unverified")}
     # Missing descriptions are not negative sponsorship evidence. Defer
     # marking those jobs seen so the next overlapping sweep can retry.
+    if cfg.get("catalogue", {}).get("enabled", False):
+        unresolved.update(j["id"] for j in fresh if j.get("verification_status") not in ("open","closed","closed_deadline","unavailable"))
     for job in fresh:
         if job["id"] not in unresolved:
             seen.setdefault(job["id"], today)
@@ -227,8 +230,18 @@ def deliver() -> int:
     retries_failed = 0
     email_batch_cap = max(1, min(int(cfg.get('scoring', {}).get('max_email_per_run', 20)), 30))
     baseline_at = load_discovery().get('baseline_initialized_at')
+    catalogue_index = {}
+    if cfg.get("catalogue",{}).get("enabled",False):
+        from sources.catalogue import validate_catalogue, empty_catalogue, identities
+        catalogue = load_json(Path("data/vacancies.json"), validate_catalogue, empty_catalogue())
+        catalogue_index = {a:j for j in catalogue["jobs"].values() for a in j.get("aliases",[])}
     def eligible_for_delivery(entry):
         # Do not replay pre-activation entries; preserve for explicit reconciliation.
+        if cfg.get("catalogue",{}).get("enabled",False):
+            record = next((catalogue_index[a] for a in identities(entry["job"]) if a in catalogue_index),{})
+            if record.get("verification_status") != "open" or record.get("eligibility",{}).get("restriction_flag"):
+                return False
+            if record.get("stale_review_required",True): return False
         return not baseline_at or str(entry.get('created_at','')) >= baseline_at
     email_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
                  if approved('email', cfg) and eligible_for_delivery(entry) and due(entry, "email", now)][:email_batch_cap]

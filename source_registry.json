@@ -647,6 +647,21 @@
       "enabled": false,
       "checked_at": "2026-10-18",
       "automation_status": "see_method_and_run_report"
+    },
+    {
+      "name": "GradPad",
+      "url": "https://www.gradpad.ie/tech/",
+      "geography": "Ireland nationwide",
+      "relevant_roles": "Technology graduate programmes; internships flagged separately",
+      "search": "discipline/location/employer/deadline",
+      "publication_dates": "Opening and closing dates; employer detail takes precedence",
+      "application_links": "Direct employer links",
+      "access_notes": "Public table inspected 18 October; 31 graduate programmes alongside internships; live parser validation pending",
+      "recommended_method": "gradpad",
+      "adapter": "gradpad",
+      "enabled": true,
+      "checked_at": "2026-10-18",
+      "automation_status": "pending_live_validation"
     }
   ]
 }

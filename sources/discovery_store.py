@@ -21,9 +21,10 @@ def refresh(jobs,outbox,cfg):
         update_catalogue(catalogue,[dict(e["job"],legacy_notification_record=True)
                          for e in outbox["jobs"].values()],cfg)
         catalogue["legacy_imported_at"]=now()
-    known={a for j in catalogue["jobs"].values() for a in j.get("aliases",[])}
+    known={a for entry in outbox["jobs"].values() for a in identities(entry["job"])}
     prior={a:j for j in catalogue["jobs"].values() for a in j.get("aliases",[])}
     candidates=[]
+    candidate_ids=set()
     for job in jobs:
         if not ROLE.search(job.get("title", "")) or seniority_of(job.get("title", ""),job.get("description", ""))=="senior":continue
         if scope_of(job,cfg) is None and job.get("source")!="gradireland":continue
@@ -34,7 +35,8 @@ def refresh(jobs,outbox,cfg):
         except (ValueError,TypeError,AttributeError):recent=False
         if recent and old.get("verification_status")=="open":
             job.update({k:v for k,v in old.items() if k not in ("id","aliases","sources","last_seen_at") and v not in (None,"",[],{})})
-        else:candidates.append(job)
+        elif job["id"] not in candidate_ids:
+            candidates.append(job); candidate_ids.add(job["id"])
     candidates.sort(key=lambda j:(geography(j),-rank(j)["rank_score"]))
     verified=verify_candidates(candidates,budget_seconds=cfg.get("catalogue",{}).get("verification_seconds",300))
     updates={j["id"]:j for j in verified}

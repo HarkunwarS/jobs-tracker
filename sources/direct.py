@@ -6,6 +6,8 @@ explicit time budget (reported partial, never reported complete).
 from __future__ import annotations
 import hashlib
 import time
+import re
+from datetime import datetime
 from urllib.parse import urljoin,urlsplit
 import requests
 from bs4 import BeautifulSoup
@@ -49,9 +51,43 @@ def fetch_site(site,budget_seconds=90):
             request_result(error=type(exc).__name__);break
     return jobs
 
+def fetch_gradpad(site):
+    r=requests.get(site["url"],headers=HEADERS,timeout=20)
+    request_result(status=r.status_code)
+    if r.status_code!=200:return []
+    soup=BeautifulSoup(r.text,"html.parser");jobs=[];seen=set()
+    def parse_day(value):
+        match=re.search(r"(\d{1,2})\s+([A-Za-z]+)\s+(20\d{2})",value)
+        if not match:return None
+        try:return datetime.strptime(" ".join(match.groups()).replace("Sept","Sep"),"%d %b %Y").date().isoformat()
+        except ValueError:return None
+    for row in soup.select("tr"):
+        cells=row.find_all("td")
+        if len(cells)<4:continue
+        link=cells[1].find("a",href=True)
+        if not link:continue
+        url=canonical_url(urljoin(site["url"],link["href"]))
+        title=link.get_text(" ",strip=True).replace("(opens in a new tab)","").strip()
+        if url in seen or not ROLE.search(title):continue
+        seen.add(url)
+        jobs.append({"id":"gp_"+hashlib.sha256(url.encode()).hexdigest()[:20],
+                     "title":title,"company":cells[0].get_text(" ",strip=True),
+                     "location":cells[3].get_text(" ",strip=True)+", Ireland",
+                     "country":"IE","link":url,"source":"GradPad",
+                     "employment_type":cells[2].get_text(" ",strip=True),
+                     "posted":parse_day(cells[4].get_text(" ",strip=True)) if len(cells)>4 else None,
+                     "deadline":parse_day(cells[5].get_text(" ",strip=True)) if len(cells)>5 else None,
+                     "date_evidence":"Aggregator dates; employer detail takes precedence",
+                     "description":""})
+    if not jobs:partial("No matching table rows; HTML schema needs review")
+    return jobs
+
+
 def fetch_direct_sites(registry):
     jobs=[]
     for site in registry.get("sources",[]):
+        if site.get("adapter")=="gradpad" and site.get("enabled"):
+            jobs.extend(tracked("direct:"+site["name"],lambda s=site:fetch_gradpad(s)))
         if site.get("adapter")=="html_listing" and site.get("enabled"):
             jobs.extend(tracked("direct:"+site["name"],lambda s=site:fetch_site(s)))
     return jobs

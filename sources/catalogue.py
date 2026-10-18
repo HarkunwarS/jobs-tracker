@@ -23,7 +23,7 @@ ROLE = re.compile(r"data|software|developer|python|java|backend|full.?stack|fron
                   r"systems.*analyst|technology|digital|\bit\b|cloud|devops|platform|"
                   r"product.*analyst|operations.*analyst|project.*(?:analyst|coordinator|manager)|"
                   r"\bpmo\b|scrum|agile|technical.*(?:support|consult)|support.*engineer|"
-                  r"quality.*(?:data|software)|test.*engineer|graduate.*consult", re.I)
+                  r"quality.*(?:data|software)|test.*engineer|\bqa\b|solutions engineer|programme?.*(?:analyst|manager)|graduate.*consult", re.I)
 SKILLS = {"python": r"\bpython\b", "java": r"\bjava\b", "sql": r"\bsql\b",
           "r": r"\br\b", "javascript": r"\bjavascript\b", "react": r"\breact\b",
           "spring boot": r"spring boot", "fastapi": r"fastapi", "flask": r"\bflask\b",
@@ -135,7 +135,7 @@ def rank(job, today=None):
     issues = []
     if not text: issues.append("Full job description not verified")
     if minimum and minimum > 1: issues.append(f"Experience wording includes {minimum}+ years; review mandatory/preferred context")
-    graduation = re.search(r"(?:graduat(?:e|ing|ion)|class of).{0,30}\b(202[7-9])\b", text, re.I)
+    graduation = re.search(r"(?:graduating in|graduate in|graduation (?:date|year)|class of).{0,15}\b(202[7-9])\b", text, re.I)
     if graduation: issues.append("Later graduation cohort specified; candidate graduated in 2026")
     if re.search(r"\bintern(?:ship)?\b|\bco.op\b|placement", title, re.I): issues.append("Internship/placement; full-time graduate eligibility needs review")
     if signal["restriction_flag"]: issues.append("Explicit work-authorisation restriction")

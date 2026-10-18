@@ -58,3 +58,5 @@ Keep the existing employer routes across technology, finance, insurance, consult
 - Ashby fields and published postings: https://developers.ashbyhq.com/docs/public-job-posting-api
 - Greenhouse published versus update timestamps: https://docs.greenhouse.io/job-board.html
 - GitHub scheduling timezone and delay caveats: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule
+
+Additional source discovered during research: [GradPad](https://www.gradpad.ie/tech/) exposes a public Irish graduate table with direct employer links, opening/closing dates and locations. Its 31 graduate programmes are distinct from the internship entries. A dedicated table adapter is included for live validation. Total inventory: 44 source routes.

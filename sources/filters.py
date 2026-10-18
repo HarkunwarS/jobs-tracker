@@ -439,12 +439,6 @@ def filter_jobs(raw_jobs: List[Dict], cfg: Dict) -> tuple:
         title = j.get("title", "") or ""
         description = j.get("description", "") or ""
 
-        if cfg.get("filtering", {}).get("technology_focus"):
-            from sources.catalogue import ROLE
-            if not ROLE.search(title):
-                counters["sector"] += 1
-                continue
-
         if is_rejected_sector(title):
             counters["sector"] += 1
             continue

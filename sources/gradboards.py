@@ -19,8 +19,7 @@ from sources.coverage import request_result, partial
 import time
 from typing import Dict, List
 
-import re
-from sources.coverage import request_result, partialquests
+import requests
 from bs4 import BeautifulSoup
 
 HEADERS = {
