@@ -1,4 +1,19 @@
-# Job Tracker v6 — Ireland-first, broad early-career recall
+# Job Tracker v7 — Ireland-first, volume-first
+
+## v7 changes (read this first)
+- No role allowlist anywhere. Non-tech titles are kept and simply rank after tech/business ones.
+- Verification FLAGS a job, it no longer blocks one. Only jobs with evidence they are closed are dropped.
+- Email: nothing dropped by score (`email_floor: 0.0`), sorted best-first, deduped, internships in their own block, up to 60 per run.
+- Telegram: up to 12 per run, full-time roles before internships, best score first.
+- Queue: undelivered alerts expire after 10 days; senior titles are rechecked at delivery time.
+- Seniority fix: "Senior Associate", "Staff ... Engineer", "Team Lead" are no longer treated as entry-level.
+- LinkedIn pagination fix: the old code stopped every query after page 1 (it expected 25 cards per page, the endpoint returns about 10).
+- Signed-grant approval system removed; missing credentials now fail the run loudly.
+- Schedule: hourly, UTC cron (the previous `timezone:` key and docs disagreed).
+
+---
+
+# (v6 notes below)
 
 Automated job tracker: fetches from ~150 company career sites, graduate
 boards, aggregator APIs, and LinkedIn every 30 minutes; filters for

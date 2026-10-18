@@ -151,9 +151,9 @@ keywords:
     - project coordinator
 
 linkedin:
-  window_hours: 96         # minimum 4d overlap handles nights/weekends/delays
+  window_hours: 48         # minimum overlap; runs are every 30 min now
   maximum_window_hours: 168 # adaptive lookback cap: one week
-  pages_per_search: 0     # paginate until exhausted, repeated, blocked or time budget
+  pages_per_search: 4     # ~10 cards per page; the old pagination never got past page 1
   detail_fetch_cap: 15     # max description fetches per run (visa candidates)
   abroad_locations:
     - United Kingdom
@@ -177,13 +177,15 @@ aggregators:
 scoring:
   cv_text_file: "data/cv_text.txt"
   telegram_thresholds:
-    ireland: 0.44          # lower bar — an Ireland match is worth pinging
-    default: 0.52
-  email_floor: 0.28        # below this, jobs are dropped to keep email sane
-  max_telegram_per_run: 5
-  max_email_per_run: 20
+    ireland: 0.40          # lower bar — an Ireland match is worth pinging
+    default: 0.50
+  email_floor: 0.0         # v7: volume first. Nothing is dropped for a low score,
+                           # the email is sorted best-first instead.
+  max_telegram_per_run: 12
+  max_email_per_run: 60
+  queue_expiry_days: 10    # undelivered alerts older than this are discarded
 
-# Production discovery enabled. Email and Telegram still require a signed operator permit + secrets.
+# Production discovery enabled. Delivery needs the channel enabled here + its secrets.
 # Events remain OFF.
 runtime:
   mode: production

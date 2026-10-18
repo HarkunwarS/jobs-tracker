@@ -32,7 +32,7 @@ from sources.notify import send_email, send_telegram
 from sources.approval import approved
 from sources.state import (StateError, load_json, save_json, validate_discovery,
                            validate_outbox, validate_seen)
-from sources.outbox import (due, empty_outbox, enqueue, iso, pending_count,
+from sources.outbox import (due, empty_outbox, enqueue, expire_stale, iso, pending_count,
                             prune_delivered, record_delivery, utcnow)
 
 CONFIG_FILE = Path("config.yaml")
@@ -86,7 +86,7 @@ def unique_by_id(jobs):
 
 
 def prepare() -> int:
-    print(f"\n🔍 Job Tracker v6 P0 — prepare {iso()}")
+    print(f"\n🔍 Job Tracker v7 — prepare {iso()}")
     cfg = load_yaml(CONFIG_FILE)
     companies = load_yaml(COMPANIES_FILE)
     seen = load_seen()
@@ -116,7 +116,7 @@ def prepare() -> int:
     if agg_cfg.get("remoteok", True):
         all_jobs += tracked("aggregator:RemoteOK", fetch_remoteok)
 
-    minimum_hours = max(96, int(li_cfg.get("window_hours", 96)))
+    minimum_hours = max(24, int(li_cfg.get("window_hours", 48)))
     maximum_hours = max(minimum_hours, int(li_cfg.get("maximum_window_hours", 168)))
     lookback = lookback_hours(discovery.get("linkedin_last_sweep_at"),
                               minimum=minimum_hours, maximum=maximum_hours)
@@ -155,8 +155,10 @@ def prepare() -> int:
                 counters["kept"] += 1
 
     if cfg.get("catalogue", {}).get("enabled", False):
-        from sources.catalogue import ROLE, eligibility
-        kept = [j for j in kept if ROLE.search(j.get("title","")) and j.get("verification_status") == "open" and not eligibility(j)["restriction_flag"]]
+        # v7: verification FLAGS a job, it never blocks one. Only jobs we have
+        # positive evidence are closed are dropped. No role allowlist.
+        CLOSED_STATES = ("closed", "closed_deadline", "unavailable")
+        kept = [j for j in kept if j.get("verification_status") not in CLOSED_STATES]
         counters["kept"] = len(kept)
     print(f"\n📊 Filters: kept {counters['kept']} · senior {counters['senior']} · "
           f"sector {counters['sector']} · out-of-scope {counters['out_of_scope']} · "
@@ -200,8 +202,6 @@ def prepare() -> int:
                   if scope_of(job, cfg) in ("visa_unverified", "eligibility_unverified")}
     # Missing descriptions are not negative sponsorship evidence. Defer
     # marking those jobs seen so the next overlapping sweep can retry.
-    if cfg.get("catalogue", {}).get("enabled", False):
-        unresolved.update(j["id"] for j in fresh if j.get("verification_status") not in ("open","closed","closed_deadline","unavailable"))
     for job in fresh:
         if job["id"] not in unresolved:
             seen.setdefault(job["id"], today)
@@ -229,28 +229,49 @@ def deliver() -> int:
     outbox = load_outbox()
     now = utcnow()
     retries_failed = 0
-    email_batch_cap = max(1, min(int(cfg.get('scoring', {}).get('max_email_per_run', 20)), 30))
+    email_batch_cap = max(1, min(int(cfg.get('scoring', {}).get('max_email_per_run', 60)), 120))
     baseline_at = load_discovery().get('baseline_initialized_at')
     catalogue_index = {}
     if cfg.get("catalogue",{}).get("enabled",False):
         from sources.catalogue import validate_catalogue, empty_catalogue, identities
         catalogue = load_json(Path("data/vacancies.json"), validate_catalogue, empty_catalogue())
         catalogue_index = {a:j for j in catalogue["jobs"].values() for a in j.get("aliases",[])}
+    expiry_days = int(cfg.get("scoring", {}).get("queue_expiry_days", 10))
+    CLOSED_STATES = ("closed", "closed_deadline", "unavailable")
+
+    from sources.filters import seniority_of
+
     def eligible_for_delivery(entry):
-        # Do not replay pre-activation entries; preserve for explicit reconciliation.
-        if cfg.get("catalogue",{}).get("enabled",False):
-            record = next((catalogue_index[a] for a in identities(entry["job"]) if a in catalogue_index),{})
-            if record.get("verification_status") != "open" or record.get("eligibility",{}).get("restriction_flag"):
+        # Only skip a job when we have evidence it is closed, senior, or the alert is stale.
+        if seniority_of(entry["job"].get("title", "")) == "senior":
+            return False
+        try:
+            created = datetime.fromisoformat(str(entry.get("created_at", "")))
+            if (now - created).days > expiry_days:
                 return False
-            if record.get("stale_review_required",True): return False
-            try:
-                checked = datetime.fromisoformat(record["date_last_verified"].replace("Z","+00:00"))
-                if (now - checked).total_seconds() > 7 * 86400: return False
-                if record.get("deadline") and str(record["deadline"])[:10] < now.date().isoformat(): return False
-            except (ValueError, TypeError, KeyError): return False
-        return not baseline_at or str(entry.get('created_at','')) >= baseline_at
-    email_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
-                 if approved('email', cfg) and eligible_for_delivery(entry) and due(entry, "email", now)][:email_batch_cap]
+        except ValueError:
+            pass
+        if catalogue_index:
+            record = next((catalogue_index[a] for a in identities(entry["job"]) if a in catalogue_index), {})
+            if record.get("verification_status") in CLOSED_STATES:
+                return False
+            if record.get("deadline") and str(record["deadline"])[:10] < now.date().isoformat():
+                return False
+        return not baseline_at or str(entry.get('created_at', '')) >= baseline_at
+
+    INTERN = __import__("re").compile(r"\bintern(?:ship)?s?\b|\bplacement|\bco-?op\b|\bstudents?\b", __import__("re").I)
+
+    def priority(item):
+        # Best first: full-time roles before internships, then highest score.
+        entry = item[1]
+        job = entry["job"]
+        return (1 if INTERN.search(job.get("title", "")) else 0,
+                1 if job.get("category", "other") == "other" else 0,
+                -float(job.get("score", 0) or 0))
+
+    email_due = sorted([(jid, entry) for jid, entry in outbox["jobs"].items()
+                        if approved('email', cfg) and eligible_for_delivery(entry) and due(entry, "email", now)],
+                       key=priority)[:email_batch_cap]
     if email_due:
         alerts = [entry["job"] for jid, entry in email_due if "telegram" in entry["channels"]]
         rest = [entry["job"] for jid, entry in email_due if "telegram" not in entry["channels"]]
@@ -266,9 +287,10 @@ def deliver() -> int:
         if not success:
             retries_failed += len(email_due)
 
-    max_telegram = max(1, int(cfg.get("scoring", {}).get("max_telegram_per_run", 10)))
-    telegram_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
-                    if approved('telegram', cfg) and eligible_for_delivery(entry) and due(entry, "telegram", now)]
+    max_telegram = max(1, int(cfg.get("scoring", {}).get("max_telegram_per_run", 12)))
+    telegram_due = sorted([(jid, entry) for jid, entry in outbox["jobs"].items()
+                           if approved('telegram', cfg) and eligible_for_delivery(entry) and due(entry, "telegram", now)],
+                          key=priority)
     print(f"\n📱 Telegram due: {len(telegram_due)}; current run cap: {max_telegram}")
     for jid, entry in telegram_due[:max_telegram]:
         try:
@@ -282,6 +304,9 @@ def deliver() -> int:
             retries_failed += 1
 
     prune_delivered(outbox)
+    expired = expire_stale(outbox, expiry_days, now)
+    if expired:
+        print(f"  🗑  Expired {expired} undelivered entries older than {expiry_days} days")
     save_outbox(outbox)
     pending = pending_count(outbox)
     print(f"  {'❌' if retries_failed else '✅'} Delivery attempts failed: {retries_failed}; "
@@ -294,7 +319,7 @@ def deliver() -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Job Tracker v6 P0 (offline-safe test harness)")
     parser.add_argument("--prepare", action="store_true", help="Fetch/score and persist queue only")
-    parser.add_argument("--deliver", action="store_true", help="Deliver ONLY with operator-signed approvals")
+    parser.add_argument("--deliver", action="store_true", help="Deliver queued alerts")
     parser.add_argument("--dry-run", action="store_true", help="Read-only state validation; NO sources, writes or sends")
     args = parser.parse_args(argv)
     if sum((args.prepare, args.deliver, args.dry_run)) > 1:
@@ -313,7 +338,7 @@ def main(argv=None) -> int:
             print('DENIED: explicit --prepare or --deliver required', file=sys.stderr)
             return 3
         if args.deliver and not any(approved(c, cfg) for c in ('email', 'telegram')):
-            print('DENIED: no operator-signed channel approvals', file=sys.stderr)
+            print('DENIED: no channel enabled in config.yaml', file=sys.stderr)
             return 3
         if args.prepare:
             return prepare()

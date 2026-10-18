@@ -3,5 +3,3 @@ beautifulsoup4==4.12.3
 PyYAML==6.0.2
 numpy==1.26.4
 sentence-transformers==2.7.0
-
-cryptography==46.0.4

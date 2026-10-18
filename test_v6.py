@@ -114,8 +114,10 @@ jobs = [
 ]
 alerts, rest, dropped = route_jobs(jobs, cfg["scoring"])
 check("route alerts", {j["title"] for j in alerts} == {"A", "C"})
-check("route rest", {j["title"] for j in rest} == {"B", "D"})
-check("route dropped", {j["title"] for j in dropped} == {"E"})
+check("route rest (v7: nothing dropped by default)", {j["title"] for j in rest} == {"B", "D", "E"})
+check("route dropped (v7: empty by default)", not dropped)
+_, _, floored = route_jobs(jobs, dict(cfg["scoring"], email_floor=0.28))
+check("floor still works when configured", {j["title"] for j in floored} == {"E"})
 
 # ── The v5 email crash case ─────────────────────────────────────────────────
 job = dict(J("Data Analyst"), score=0.7, boost=0.08, scope="ireland", category="data_ml")

@@ -62,7 +62,7 @@ def main() -> int:
         cfg = yaml.safe_load(f) or {}
 
     if not approved('events_email', cfg):
-        print('DENIED: events notification requires separate operator-signed approval')
+        print('DENIED: events notification is disabled in config.yaml')
         return 3
 
     events = collect_events(cfg)
