@@ -16,11 +16,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sources.state import (load_json, save_json, validate_seen,
                            validate_outbox, validate_discovery)
 from sources.outbox import empty_outbox
+from sources.catalogue import validate_catalogue, validate_applications, empty_catalogue
+from sources.discovery_store import export
 
 DATA = Path("data")
 PATHS = [DATA / "seen_jobs.json", DATA / "notification_outbox.json", DATA / "discovery_state.json"]
 VALIDATORS = [validate_seen, validate_outbox, validate_discovery]
 DEFAULTS = [{}, empty_outbox(), {"linkedin_last_sweep_at": ""}]
+PATHS += [DATA / "vacancies.json", DATA / "applications.json", DATA / "discovery_report.json"]
+VALIDATORS += [validate_catalogue, validate_applications, lambda x:x]
+DEFAULTS += [empty_catalogue(), {"version":1,"records":{}}, {}]
 
 
 def git(*args, check=True):
@@ -62,12 +67,42 @@ def merge_outbox(local, remote):
 
 
 def merge_discovery(local, remote):
-    return validate_discovery({"linkedin_last_sweep_at": max(
-        local.get("linkedin_last_sweep_at", ""), remote.get("linkedin_last_sweep_at", ""))})
+    result = {**local, **remote}
+    result["linkedin_last_sweep_at"] = max(local.get("linkedin_last_sweep_at", ""), remote.get("linkedin_last_sweep_at", ""))
+    baseline = [x.get("baseline_initialized_at") for x in (local,remote) if x.get("baseline_initialized_at")]
+    if baseline: result["baseline_initialized_at"] = min(baseline)
+    return validate_discovery(result)
+
+
+def merge_catalogue(local, remote):
+    result = copy.deepcopy(remote)
+    for key, job in local["jobs"].items():
+        old = result["jobs"].get(key,{})
+        newer,older = (job,old) if job.get("last_seen_at","") >= old.get("last_seen_at","") else (old,job)
+        merged = {**older,**newer}
+        merged["aliases"] = sorted(set(old.get("aliases",[])+job.get("aliases",[])))
+        merged["sources"] = sorted(set(old.get("sources",[])+job.get("sources",[])))
+        discovered=[j["date_discovered"] for j in (old,job) if j.get("date_discovered")]
+        if discovered: merged["date_discovered"]=min(discovered)
+        result["jobs"][key]=merged
+    result["runs"] = sorted({__import__('json').dumps(r,sort_keys=True):r for r in local.get("runs",[])+remote.get("runs",[])}.values(),key=lambda r:r["at"])
+    result["legacy_imported_at"] = remote.get("legacy_imported_at") or local.get("legacy_imported_at")
+    return validate_catalogue(result)
+
+
+def merge_applications(local, remote):
+    result = copy.deepcopy(remote)
+    for key, record in local["records"].items():
+        old=result["records"].get(key,{})
+        history=sorted({__import__('json').dumps(e,sort_keys=True):e for e in old.get("history",[])+record.get("history",[])}.values(),key=lambda e:e["at"])
+        merged={**old,**record,"history":history}
+        if history:merged.update(status=history[-1]["to"],updated_at=history[-1]["at"])
+        result["records"][key]=merged
+    return validate_applications(result)
 
 
 def commit_if_changed(message):
-    git("add", *(str(x) for x in PATHS))
+    git("add", *(str(x) for x in PATHS if x.exists()), *(["data/vacancies.csv"] if Path("data/vacancies.csv").exists() else []))
     if git("diff", "--cached", "--quiet", check=False).returncode == 0:
         return False
     git("commit", "-m", message)
@@ -104,9 +139,11 @@ def main(branch):
         git("reset", "--hard", "FETCH_HEAD")
         remote = [load_json(path, val, default) for path, val, default in zip(PATHS, VALIDATORS, DEFAULTS)]
         merged = [merge_seen(local[0], remote[0]), merge_outbox(local[1], remote[1]),
-                  merge_discovery(local[2], remote[2])]
+                  merge_discovery(local[2], remote[2]), merge_catalogue(local[3],remote[3]),
+                  merge_applications(local[4],remote[4]), max((local[5],remote[5]),key=lambda r:r.get("at",""))]
         for path, data, val in zip(PATHS, merged, VALIDATORS):
             save_json(path, data, val)
+        export(merged[3])
         local = merged
         commit_if_changed("chore: reconcile tracker state [skip ci]")
         time.sleep(2 ** attempt)

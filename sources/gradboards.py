@@ -15,6 +15,7 @@ handles overlap between runs.
 from __future__ import annotations
 
 import re
+from sources.coverage import request_result, partial
 import time
 from typing import Dict, List
 
@@ -42,11 +43,17 @@ def fetch_gradireland(pages: int = 3, sleep_between: float = 1.0) -> List[Dict]:
     out: List[Dict] = []
     seen_ids = set()
 
-    for page in range(1, pages + 1):
+    page = 0
+    end = time.monotonic() + 120
+    while not pages or page < pages:
+        if time.monotonic() >= end:
+            partial("GradIreland pagination time budget exhausted"); break
+        page += 1
         url = f"https://gradireland.com/s/jobs/all/{page}" if page > 1 \
             else "https://gradireland.com/s/jobs/all"
         try:
             r = requests.get(url, headers=HEADERS, timeout=TIMEOUT)
+            request_result(status=r.status_code)
             if r.status_code != 200:
                 break
             soup = BeautifulSoup(r.text, "html.parser")
@@ -87,9 +94,10 @@ def fetch_gradireland(pages: int = 3, sleep_between: float = 1.0) -> List[Dict]:
                 "id":          f"gi_{job_id}",
                 "title":       title,
                 "company":     company,
-                "location":    "Ireland",
+                "location":    "",
+                "country":     None,
                 "link":        f"https://gradireland.com{a['href']}",
-                "posted":      "Recent",
+                "posted":      None,
                 "source":      "gradireland",
                 "description": "",
             })
@@ -99,5 +107,5 @@ def fetch_gradireland(pages: int = 3, sleep_between: float = 1.0) -> List[Dict]:
             break
         time.sleep(sleep_between)
 
-    print(f"  ✓ gradireland: {len(out)} jobs from {pages} page(s)")
+    print(f"  ✓ gradireland: {len(out)} jobs from {page} page(s)")
     return out

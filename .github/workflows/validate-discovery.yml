@@ -1,0 +1,37 @@
+name: Validate discovery improvements
+on:
+  push:
+    branches: [discovery-upgrade-20261018]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Offline regression tests
+        run: |
+          python test_v6.py
+          python -m unittest discover -s tests -v
+      - name: Live scan in disposable state (no notifications)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+        run: python scripts/live_scan.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: discovery-validation-${{ github.run_id }}
+          path: validation-results/
+          retention-days: 30

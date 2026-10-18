@@ -16,6 +16,10 @@ All fetchers return list[dict] with the unified shape:
 from __future__ import annotations
 
 import time
+import hashlib
+from datetime import datetime, timezone
+from sources.coverage import tracked, request_result, partial
+from sources.catalogue import plain
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List
@@ -36,8 +40,10 @@ TIMEOUT = 20
 def _safe_get(url: str, **kw) -> requests.Response | None:
     try:
         r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, **kw)
+        request_result(status=r.status_code)
         return r if r.status_code == 200 else None
-    except Exception:
+    except Exception as exc:
+        request_result(error=type(exc).__name__)
         return None
 
 
@@ -60,9 +66,12 @@ def fetch_greenhouse(company: str, slug: str) -> List[Dict]:
             "company":     company,
             "location":    loc,
             "link":        j.get("absolute_url", f"https://boards.greenhouse.io/{slug}"),
-            "posted":      (j.get("updated_at", "") or "")[:10] or "Recent",
+            "posted":      (j.get("first_published", "") or "")[:10] or None,
             "source":      "Greenhouse",
-            "description": (j.get("content", "") or "")[:3000],
+            "updated_at": j.get("updated_at"),
+            "requisition_id": j.get("requisition_id"),
+            "posted_kind": "published",
+            "description": (j.get("content", "") or ""),
         })
     return out
 
@@ -88,9 +97,11 @@ def fetch_lever(company: str, slug: str) -> List[Dict]:
             "company":     company,
             "location":    loc,
             "link":        j.get("hostedUrl", f"https://jobs.lever.co/{slug}"),
-            "posted":      str(j.get("createdAt", "Recent"))[:10],
+            "posted":      datetime.fromtimestamp(j["createdAt"]/1000, timezone.utc).isoformat() if isinstance(j.get("createdAt"), (int,float)) else None,
             "source":      "Lever",
-            "description": (j.get("descriptionPlain", "") or "")[:3000],
+            "work_model": j.get("workplaceType"),
+            "country": j.get("country"),
+            "description": plain(j.get("descriptionPlain", "") or "") + " " + " ".join(plain(x.get("content", "")) for x in j.get("lists", [])) + " " + plain(j.get("additionalPlain", "")),
         })
     return out
 
@@ -107,16 +118,21 @@ def fetch_ashby(company: str, slug: str) -> List[Dict]:
         return []
     out = []
     for j in jobs:
-        loc = j.get("locationName", "") or ("Remote" if j.get("isRemote") else "Not specified")
+        if j.get("isListed") is False: continue
+        loc = j.get("location", "") or j.get("locationName", "") or ("Remote" if j.get("isRemote") else "Not specified")
         out.append({
-            "id":          f"ab_{slug}_{j.get('id', '')}",
+            "id":          f"ab_{slug}_{j.get('id') or hashlib.sha256(j.get('jobUrl', '').encode()).hexdigest()[:20]}",
             "title":       j.get("title", ""),
             "company":     company,
             "location":    loc,
             "link":        j.get("jobUrl", f"https://jobs.ashbyhq.com/{slug}"),
-            "posted":      (j.get("publishedDate", "") or "")[:10] or "Recent",
+            "posted":      (j.get("publishedAt", "") or "")[:10] or None,
             "source":      "Ashby",
-            "description": (j.get("descriptionPlain", "") or "")[:3000],
+            "country": (j.get("address", {}).get("postalAddress") or {}).get("addressCountry"),
+            "work_model": j.get("workplaceType"),
+            "employment_type": j.get("employmentType"),
+            "salary": j.get("compensation"),
+            "description": (j.get("descriptionPlain", "") or ""),
         })
     return out
 
@@ -145,7 +161,7 @@ def fetch_workable(company: str, slug: str) -> List[Dict]:
             "link":        f"https://apply.workable.com/{slug}/j/{shortcode}/",
             "posted":      (j.get("published", "") or "")[:10] or "Recent",
             "source":      "Workable",
-            "description": (j.get("description", "") or "")[:3000],
+            "description": (j.get("description", "") or ""),
         })
     return out
 
@@ -153,13 +169,21 @@ def fetch_workable(company: str, slug: str) -> List[Dict]:
 # ── SmartRecruiters ─────────────────────────────────────────────────────────
 
 def fetch_smartrecruiters(company: str, slug: str) -> List[Dict]:
-    r = _safe_get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100")
-    if not r:
-        return []
-    try:
-        jobs = r.json().get("content", [])
-    except Exception:
-        return []
+    jobs, offset, seen_pages = [], 0, set()
+    end = time.monotonic() + 120
+    while True:
+        if time.monotonic() >= end:
+            partial("SmartRecruiters pagination time budget exhausted"); break
+        r = _safe_get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=100&offset={offset}")
+        if r is None: break
+        payload = r.json()
+        batch = payload.get("content", [])
+        if not batch: break
+        ids = tuple(j.get("id") for j in batch)
+        if ids in seen_pages:
+            partial("Repeated pagination page"); break
+        seen_pages.add(ids); jobs.extend(batch); offset += len(batch)
+        if offset >= payload.get("totalFound", offset + 1): break
     out = []
     for j in jobs:
         loc_obj = j.get("location") or {}
@@ -174,6 +198,8 @@ def fetch_smartrecruiters(company: str, slug: str) -> List[Dict]:
             "link":        f"https://jobs.smartrecruiters.com/{slug}/{job_id}",
             "posted":      (j.get("releasedDate", "") or "")[:10] or "Recent",
             "source":      "SmartRecruiters",
+            "country": loc_obj.get("country"),
+            "detail_api": f"https://api.smartrecruiters.com/v1/companies/{slug}/postings/{job_id}",
             "description": "",
         })
     return out
@@ -193,7 +219,7 @@ def fetch_personio(company: str, slug: str) -> List[Dict]:
     for pos in root.findall(".//position"):
         try:
             job_id = pos.findtext("id", "") or ""
-            desc = " ".join(v.text for v in pos.findall(".//jobDescription/value") if v.text)[:3000]
+            desc = " ".join(v.text for v in pos.findall(".//jobDescription/value") if v.text)
             out.append({
                 "id":          f"ps_{slug}_{job_id}",
                 "title":       pos.findtext("name", "") or "",
@@ -211,7 +237,7 @@ def fetch_personio(company: str, slug: str) -> List[Dict]:
 
 # ── Jibe / iCIMS career sites (NEW — this is what SIG uses) ─────────────────
 
-def fetch_jibe(company: str, host: str, pages: int = 3) -> List[Dict]:
+def fetch_jibe(company: str, host: str, pages: int = 0) -> List[Dict]:
     """
     Jibe-powered career sites (e.g. careers.sig.com) expose a JSON search
     endpoint at https://<host>/api/jobs?page=N. Response shape:
@@ -220,7 +246,11 @@ def fetch_jibe(company: str, host: str, pages: int = 3) -> List[Dict]:
     Field names vary slightly per tenant, so we probe several keys.
     """
     out: List[Dict] = []
-    for page in range(1, pages + 1):
+    page, fetched_ids = 0, set()
+    end = time.monotonic() + 120
+    while not pages or page < pages:
+        if time.monotonic() >= end:
+            partial("Jibe pagination time budget exhausted"); break
         r = _safe_get(f"https://{host}/api/jobs?page={page}&sortBy=posted_date&descending=true")
         if not r:
             break
@@ -231,6 +261,10 @@ def fetch_jibe(company: str, host: str, pages: int = 3) -> List[Dict]:
         jobs = payload.get("jobs", [])
         if not jobs:
             break
+        ids = tuple(str(w.get("data", w).get("req_id", w.get("data", w).get("id", w.get("data", w).get("slug")))) for w in jobs)
+        if ids in fetched_ids:
+            partial("Repeated Jibe page"); break
+        fetched_ids.add(ids)
         for wrapper in jobs:
             d = wrapper.get("data", wrapper) or {}
             title = d.get("title", "")
@@ -252,12 +286,13 @@ def fetch_jibe(company: str, host: str, pages: int = 3) -> List[Dict]:
                 "link":        link,
                 "posted":      posted or "Recent",
                 "source":      "CareerSite",
-                "description": (d.get("description", "") or "")[:3000],
+                "description": (d.get("description", "") or ""),
             })
         # Stop early if the API reports fewer total pages
         total_pages = payload.get("totalPages") or payload.get("pageCount")
-        if total_pages and page >= int(total_pages):
+        if total_pages and page + 1 >= int(total_pages):
             break
+        page += 1
         time.sleep(0.3)
     return out
 
@@ -266,18 +301,25 @@ def fetch_jibe(company: str, host: str, pages: int = 3) -> List[Dict]:
 
 def fetch_workday(company: str, tenant: str, wd_n: int, ext_path: str) -> List[Dict]:
     url = f"https://{tenant}.wd{wd_n}.myworkdayjobs.com/wday/cxs/{tenant}/{ext_path}/jobs"
-    try:
-        r = requests.post(
-            url,
-            json={"appliedFacets": {}, "limit": 50, "offset": 0, "searchText": ""},
-            headers={**HEADERS, "Content-Type": "application/json", "Accept": "application/json"},
-            timeout=TIMEOUT,
-        )
-        if r.status_code != 200:
-            return []
-        jobs = r.json().get("jobPostings", [])
-    except Exception:
-        return []
+    jobs, offset, seen_pages = [], 0, set()
+    end = time.monotonic() + 120
+    while True:
+        if time.monotonic() >= end:
+            partial("Workday pagination time budget exhausted"); break
+        try:
+            r = requests.post(url, json={"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": ""},
+                              headers={**HEADERS,"Content-Type":"application/json"}, timeout=TIMEOUT)
+            request_result(status=r.status_code)
+            if r.status_code != 200: break
+            payload = r.json(); batch = payload.get("jobPostings", [])
+            if not batch: break
+            ids = tuple(j.get("externalPath") for j in batch)
+            if ids in seen_pages:
+                partial("Repeated pagination page"); break
+            seen_pages.add(ids); jobs.extend(batch); offset += len(batch)
+            if offset >= payload.get("total", offset + 1): break
+        except requests.RequestException as exc:
+            request_result(error=type(exc).__name__); break
     out = []
     base_view = f"https://{tenant}.wd{wd_n}.myworkdayjobs.com/en-US/{ext_path}"
     for j in jobs:
@@ -290,6 +332,8 @@ def fetch_workday(company: str, tenant: str, wd_n: int, ext_path: str) -> List[D
             "link":        f"{base_view}{ext_id}",
             "posted":      j.get("postedOn", "") or "Recent",
             "source":      "Workday",
+            "detail_api": url.removesuffix("/jobs") + ext_id,
+            "requisition_id": (j.get("bulletFields") or [None])[0],
             "description": "",
         })
     return out
@@ -335,7 +379,7 @@ def fetch_all_companies(companies_cfg: Dict, max_workers: int = 12) -> List[Dict
     all_jobs: List[Dict] = []
     print(f"  → {len(tasks)} company fetch tasks, {max_workers} workers")
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(fn): label for label, fn in tasks}
+        futures = {pool.submit(tracked, label, fn): label for label, fn in tasks}
         for fut in as_completed(futures):
             label = futures[fut]
             try:

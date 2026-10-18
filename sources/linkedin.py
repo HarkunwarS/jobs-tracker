@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 
 import requests
 from bs4 import BeautifulSoup
+from sources.coverage import tracked, request_result, partial
 
 HEADERS = {
     "User-Agent": (
@@ -54,15 +55,16 @@ def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
     """
     out: List[Dict] = []
     seen = set()
-    for page in range(max(1, pages)):
+    page=0; end=time.monotonic()+45
+    while not pages or page < pages:
+        if time.monotonic()>=end:
+            partial("LinkedIn query time budget exhausted");break
         url = _search_url(keyword, location, seconds, start=page * 25)
         for attempt in range(2):
             try:
                 r = requests.get(url, headers=HEADERS, timeout=15)
+                request_result(status=r.status_code)
                 if r.status_code == 429:
-                    if attempt == 0:
-                        time.sleep(30 + random.uniform(0, 10))
-                        continue
                     print(f"  ⚠️  LinkedIn throttled: {keyword!r} @ {location}")
                     return out
                 if r.status_code != 200:
@@ -70,6 +72,7 @@ def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
                     return out
                 break
             except requests.RequestException as exc:
+                request_result(error=type(exc).__name__)
                 print(f"  ⚠️  LinkedIn request error: {type(exc).__name__}")
                 return out
         else:
@@ -77,6 +80,7 @@ def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
 
         soup = BeautifulSoup(r.text, "html.parser")
         cards = soup.find_all("div", class_="base-card")
+        previous=len(seen)
         for card in cards:
             try:
                 urn = card.get("data-entity-urn", "")
@@ -102,8 +106,10 @@ def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
                 })
             except (KeyError, AttributeError, ValueError):
                 continue
-        if len(cards) < 25:
+        if len(cards) < 25 or len(seen)==previous:
             break
+        page+=1
+    if pages and page>=pages:partial("Configured LinkedIn page limit reached")
     return out
 
 
@@ -141,9 +147,13 @@ def fetch_linkedin_sweep(
     all_jobs: List[Dict] = []
     seen_ids = set()
     print(f"  → LinkedIn: {len(searches)} searches, {window_hours}h lookback, "
-          f"up to {pages_per_search} pages per query")
+          f"{'time-budgeted pagination' if not pages_per_search else str(pages_per_search)+' pages per query'}")
+    end=time.monotonic()+600
     for kw, loc in searches:
-        jobs = fetch_linkedin(kw, loc, seconds=seconds, pages=pages_per_search)
+        if time.monotonic()>=end:
+            tracked("LinkedIn:"+loc+":"+kw,lambda: (partial("Sweep time budget exhausted; query deferred"),[])[1])
+            continue
+        jobs = tracked("LinkedIn:"+loc+":"+kw,lambda: fetch_linkedin(kw, loc, seconds=seconds, pages=pages_per_search))
         if jobs:
             print(f"    ✓ {kw!r} @ {loc}: {len(jobs)}")
         for job in jobs:

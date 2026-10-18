@@ -19,6 +19,10 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent))
 
 from sources.ats import fetch_all_companies
+from sources.coverage import tracked
+from sources.direct import fetch_direct_sites
+from sources.discovery_store import refresh as refresh_catalogue
+import json
 from sources.aggregators import fetch_adzuna, fetch_arbeitnow, fetch_jooble, fetch_remoteok, fetch_remotive
 from sources.gradboards import fetch_gradireland
 from sources.linkedin import enrich_descriptions, fetch_linkedin_sweep, lookback_hours
@@ -98,19 +102,19 @@ def prepare() -> int:
     print("\n🌐 ATS & company career sites…")
     all_jobs += fetch_all_companies(companies)
     print("\n🎓 Graduate boards…")
-    all_jobs += fetch_gradireland(pages=int(cfg.get("gradireland", {}).get("pages", 3)))
+    all_jobs += tracked("gradireland", lambda: fetch_gradireland(pages=int(cfg.get("gradireland", {}).get("pages", 0))))
     print("\n📦 Aggregators…")
     if agg_cfg.get("jooble", True):
-        all_jobs += fetch_jooble(kw_cfg.get("aggregator_queries", ["graduate"]), location="Ireland")
+        all_jobs += tracked("aggregator:Jooble", lambda: fetch_jooble(kw_cfg.get("aggregator_queries", ["graduate"]), location="Ireland"))
     if agg_cfg.get("adzuna", True):
-        all_jobs += fetch_adzuna(kw_cfg.get("aggregator_queries", ["graduate"]),
-                                 countries=agg_cfg.get("adzuna_countries", ["gb"]))
+        all_jobs += tracked("aggregator:Adzuna", lambda: fetch_adzuna(kw_cfg.get("aggregator_queries", ["graduate"]),
+                                 countries=agg_cfg.get("adzuna_countries", ["gb"])))
     if agg_cfg.get("arbeitnow", True):
-        all_jobs += fetch_arbeitnow(visa_only=True)
+        all_jobs += tracked("aggregator:Arbeitnow", lambda: fetch_arbeitnow(visa_only=True, pages=0))
     if agg_cfg.get("remotive", True):
-        all_jobs += fetch_remotive()
+        all_jobs += tracked("aggregator:Remotive", fetch_remotive)
     if agg_cfg.get("remoteok", True):
-        all_jobs += fetch_remoteok()
+        all_jobs += tracked("aggregator:RemoteOK", fetch_remoteok)
 
     minimum_hours = max(96, int(li_cfg.get("window_hours", 96)))
     maximum_hours = max(minimum_hours, int(li_cfg.get("maximum_window_hours", 168)))
@@ -125,11 +129,17 @@ def prepare() -> int:
         pages_per_search=int(li_cfg.get("pages_per_search", 2)),
     )
 
+    suppressed_ids = set()
+    if cfg.get("catalogue", {}).get("enabled", False):
+        registry_path = Path(cfg["catalogue"].get("registry", "source_registry.json"))
+        if registry_path.exists():
+            all_jobs += fetch_direct_sites(json.loads(registry_path.read_text()))
+        all_jobs, suppressed_ids = refresh_catalogue(all_jobs, outbox, cfg)
     all_jobs = unique_by_id(all_jobs)
     if not all_jobs and not discovery.get("baseline_initialized_at"):
         print("  ❌ Initial baseline aborted: no jobs returned by any source; no state was changed")
         return 2
-    fresh = [job for job in all_jobs if job["id"] not in seen]
+    fresh = [job for job in all_jobs if job["id"] not in seen and job["id"] not in suppressed_ids]
     print(f"\n📥 {len(fresh)} fresh unique IDs (of {len(all_jobs)} fetched unique IDs)")
 
     kept, unverified, counters = filter_jobs(fresh, cfg)
@@ -144,6 +154,10 @@ def prepare() -> int:
                 kept.append(job)
                 counters["kept"] += 1
 
+    if cfg.get("catalogue", {}).get("enabled", False):
+        from sources.catalogue import ROLE, eligibility
+        kept = [j for j in kept if ROLE.search(j.get("title","")) and j.get("verification_status") == "open" and not eligibility(j)["restriction_flag"]]
+        counters["kept"] = len(kept)
     print(f"\n📊 Filters: kept {counters['kept']} · senior {counters['senior']} · "
           f"sector {counters['sector']} · out-of-scope {counters['out_of_scope']} · "
           f"sponsorship-unverified {counters['unverified']}")
@@ -186,6 +200,8 @@ def prepare() -> int:
                   if scope_of(job, cfg) in ("visa_unverified", "eligibility_unverified")}
     # Missing descriptions are not negative sponsorship evidence. Defer
     # marking those jobs seen so the next overlapping sweep can retry.
+    if cfg.get("catalogue", {}).get("enabled", False):
+        unresolved.update(j["id"] for j in fresh if j.get("verification_status") not in ("open","closed","closed_deadline","unavailable"))
     for job in fresh:
         if job["id"] not in unresolved:
             seen.setdefault(job["id"], today)
@@ -215,8 +231,23 @@ def deliver() -> int:
     retries_failed = 0
     email_batch_cap = max(1, min(int(cfg.get('scoring', {}).get('max_email_per_run', 20)), 30))
     baseline_at = load_discovery().get('baseline_initialized_at')
+    catalogue_index = {}
+    if cfg.get("catalogue",{}).get("enabled",False):
+        from sources.catalogue import validate_catalogue, empty_catalogue, identities
+        catalogue = load_json(Path("data/vacancies.json"), validate_catalogue, empty_catalogue())
+        catalogue_index = {a:j for j in catalogue["jobs"].values() for a in j.get("aliases",[])}
     def eligible_for_delivery(entry):
         # Do not replay pre-activation entries; preserve for explicit reconciliation.
+        if cfg.get("catalogue",{}).get("enabled",False):
+            record = next((catalogue_index[a] for a in identities(entry["job"]) if a in catalogue_index),{})
+            if record.get("verification_status") != "open" or record.get("eligibility",{}).get("restriction_flag"):
+                return False
+            if record.get("stale_review_required",True): return False
+            try:
+                checked = datetime.fromisoformat(record["date_last_verified"].replace("Z","+00:00"))
+                if (now - checked).total_seconds() > 7 * 86400: return False
+                if record.get("deadline") and str(record["deadline"])[:10] < now.date().isoformat(): return False
+            except (ValueError, TypeError, KeyError): return False
         return not baseline_at or str(entry.get('created_at','')) >= baseline_at
     email_due = [(jid, entry) for jid, entry in outbox["jobs"].items()
                  if approved('email', cfg) and eligible_for_delivery(entry) and due(entry, "email", now)][:email_batch_cap]

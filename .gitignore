@@ -11,3 +11,10 @@ data/*.embedding.npy
 
 # Local logs / debug
 *.log
+
+
+!data/vacancies.json
+!data/vacancies.csv
+!data/applications.json
+!data/discovery_report.json
+validation-results/

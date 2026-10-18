@@ -95,10 +95,8 @@ greenhouse:
 # ── Lever ───────────────────────────────────────────────────────────────────
   # ── Added v6 (verify in first run logs; a wrong slug just yields 0 jobs)
   Stripe: stripe
-  Datadog: datadog
   Elastic: elastic
   GitLab: gitlab
-  HashiCorp: hashicorp
   Squarespace: squarespace
   Udemy: udemy
 
@@ -160,6 +158,8 @@ workable:
 # ── SmartRecruiters ─────────────────────────────────────────────────────────
 # Slug examples — many Irish offices use this.
 smartrecruiters:
+  Arista Networks: AristaNetworks
+  Ryanair: RyanairGroupHoldings
   Bosch Group: BoschGroup
   Allianz: Allianz1
   Hitachi: Hitachi1
@@ -186,14 +186,13 @@ workday_tenants:
   Aer Lingus:        [aerlingus,        3, External]
   Ryanair:           [ryanair,          3, External]
   Glanbia:           [glanbia,          3, External]
-  ESB:               [esb,              3, ESB]
   Kerry Group:       [kerry,            3, External]
-  Pfizer:            [pfizer,           3, PfizerCareers]
+  Pfizer:            [pfizer,           1, PfizerCareers]
   J&J:               [jnj,              3, jnjcareers]
   MSD:               [merck,            3, SearchJobs]
   Medtronic:         [medtronic,        5, External]
   Boston Scientific: [bostonscientific, 3, External]
-  Stryker:           [stryker,          1, Stryker_Careers]
+  Stryker:           [stryker,          1, StrykerCareers]
   Abbvie:            [abbvie,           5, External]
   EY:                [ey,               3, EY_Careers]
   Deloitte:          [deloitte,         3, Deloitte_Careers]
@@ -215,3 +214,4 @@ jibe:
 # ignored — removed. If you want a company with no public ATS endpoint,
 # check whether their careers site is Jibe-powered (view-source and look
 # for jibecdn.com), else rely on the LinkedIn/Jooble sweeps to catch them.
+

@@ -97,8 +97,10 @@ def seniority_of(title: str, description: str = "") -> str:
     if description:
         if DESC_ENTRY_PATTERN.search(description):
             return "entry"
-        if DESC_SENIOR_PATTERN.search(description):
-            return "senior"
+        for match in DESC_SENIOR_PATTERN.finditer(description):
+            context = description[max(0,match.start()-35):match.end()+45]
+            if not re.search(r"preferred|desirable|nice.to.have|advantage|ideally",context,re.I):
+                return "senior"
     return "unspecified"
 
 
@@ -350,7 +352,11 @@ def scope_of(job: Dict, cfg: Dict) -> Optional[str]:
             or RESTRICTED_WORK_RESIDENCY.search(constraint_text)):
         return None
     if NI_PATTERN.search(' '.join((location, country, physical))):
-        return None
+        if not cfg.get('filtering', {}).get('international_candidates'):
+            return None
+        from sources.catalogue import eligibility
+        signal = eligibility(job)
+        return 'visa' if signal['sponsorship'] in ('employer_stated','source_reported') or signal['international_candidates']=='explicitly_considered' else None
     conflict = _country_conflict(location, country, physical)
     remote_listing = bool(re.match(r"\s*(?:fully\s+)?remote\b", location, re.I))
     # Even if another field asserts Ireland, unknown/non-Irish country values
@@ -393,6 +399,14 @@ def scope_of(job: Dict, cfg: Dict) -> Optional[str]:
         return 'eu_remote'
     if loc_cfg.get('remote_anywhere', True) and matches_any(area, REMOTE_ANYWHERE_PATTERNS):
         return 'remote'
+    if cfg.get('filtering', {}).get('international_candidates'):
+        from sources.catalogue import eligibility
+        signal = eligibility(job)
+        if signal['international_candidates']=='explicitly_considered':
+            return 'international'
+        if signal['sponsorship'] in ('employer_stated','source_reported'):
+            region = is_visa_sponsor_location(location or physical,cfg)
+            return 'asia' if region == 'asia' else 'visa'
     if loc_cfg.get('visa_sponsoring', True):
         region = is_visa_sponsor_location(location or physical, cfg)
         if region:
