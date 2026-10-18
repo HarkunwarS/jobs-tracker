@@ -172,7 +172,7 @@ def update_catalogue(catalogue, jobs, cfg, timestamp=None):
     for raw in jobs:
         if not raw.get("title") or not raw.get("link"): continue
         title=raw["title"]
-        if not ROLE.search(title) or is_rejected_sector(title) or seniority_of(title,plain(raw.get("description")))=="senior":
+        if is_rejected_sector(title) or seniority_of(title,plain(raw.get("description")))=="senior":
             counts["out_of_scope"]+=1;continue
         job=copy.deepcopy(raw)
         job["description"]=plain(job.get("description"))

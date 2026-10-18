@@ -79,3 +79,21 @@ def prune_delivered(outbox, now=None, retention_days=30):
             newest = max(datetime.fromisoformat(s["sent_at"]) for s in channels)
             if newest < cutoff:
                 del outbox["jobs"][jid]
+
+
+def expire_stale(outbox, max_age_days=10, now=None):
+    """Drop still-pending entries older than max_age_days: a 10-day-old alert is noise."""
+    now = now or utcnow()
+    cutoff = now - timedelta(days=max_age_days)
+    removed = 0
+    for jid, entry in list(outbox["jobs"].items()):
+        if all(s["status"] == "sent" for s in entry["channels"].values()):
+            continue
+        try:
+            created = datetime.fromisoformat(entry["created_at"])
+        except (KeyError, ValueError):
+            continue
+        if created < cutoff:
+            del outbox["jobs"][jid]
+            removed += 1
+    return removed

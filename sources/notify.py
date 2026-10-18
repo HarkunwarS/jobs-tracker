@@ -5,6 +5,7 @@ SMTP/Telegram cannot promise exactly-once deliveries after ambiguous crashes.
 from __future__ import annotations
 
 import os
+import re
 import smtplib
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -20,6 +21,7 @@ SCOPE_META = {
     "remote":    ("🌍 Remote — anywhere", 2),
     "visa":      ("✈️ Europe (sponsorship mentioned)", 3),
     "asia":      ("🌏 Asia / UAE (sponsorship mentioned)", 4),
+    "visa_unverified": ("🌐 Abroad (sponsorship not stated)", 5),
 }
 
 CATEGORY_LABELS = {
@@ -51,6 +53,43 @@ def _chip(text: str, color: str = "#555") -> str:
             f'border-radius:99px;font-size:11px;font-weight:600;">{_html_escape(text)}</span>')
 
 
+INTERN_RE = re.compile(r"\bintern(?:ship)?s?\b|\bplacement|\bco-?op\b|\bstudents?\b", re.I)
+
+
+def is_internship(job: Dict) -> bool:
+    return bool(INTERN_RE.search(job.get("title", "")))
+
+
+def _tidy_posted(value) -> str:
+    """Show YYYY-MM-DD only; hide placeholders like 'Recent' / 'None'."""
+    text = str(value or "").strip()
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", text)
+    return m.group(1) if m else ""
+
+
+def _tidy_location(value) -> str:
+    return re.sub(r",?\s*UNAVAILABLE\b", "", str(value or ""), flags=re.I).strip(" ,")
+
+
+def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
+    """Collapse same company+title (+location) repeats; keep the highest score."""
+    best: Dict[tuple, Dict] = {}
+    for j in jobs:
+        key = (re.sub(r"[^a-z0-9]+", "", str(j.get("company", "")).lower()),
+               re.sub(r"[^a-z0-9]+", "", str(j.get("title", "")).lower()),
+               re.sub(r"[^a-z0-9]+", "", _tidy_location(j.get("location", "")).lower()))
+        if key not in best or j.get("score", 0) > best[key].get("score", 0):
+            best[key] = j
+    return list(best.values())
+
+
+def _flag_chip(job: Dict) -> str:
+    flags = job.get("review_flags") or []
+    if any("work-authorisation" in str(f) for f in flags):
+        return _chip("⚠ check work-auth wording", "#b45309")
+    return ""
+
+
 def _job_row_html(job: Dict) -> str:
     cat = CATEGORY_LABELS.get(job.get("category", "other"), "Other")
     return f"""
@@ -59,13 +98,14 @@ def _job_row_html(job: Dict) -> str:
     <a href="{_html_escape(job.get('link', '#'))}" style="font-size:15px;font-weight:600;
        color:#0a66c2;text-decoration:none;">{_html_escape(job.get('title', ''))}</a>
     <div style="font-size:13px;color:#444;margin-top:4px;">
-      🏢 {_html_escape(job.get('company', ''))} &nbsp;·&nbsp; 📍 {_html_escape(job.get('location', ''))}
+      🏢 {_html_escape(job.get('company', ''))} &nbsp;·&nbsp; 📍 {_html_escape(_tidy_location(job.get('location', '')))}
     </div>
     <div style="margin-top:6px;">
       {_score_badge(job.get('score', 0.0), job.get('boost', 0.0))} &nbsp;
       {_chip(cat, '#7a4fbc')} &nbsp;
-      {_chip(job.get('source', ''), '#185FA5')}
-      <span style="font-size:11px;color:#aaa;margin-left:8px;">🕐 {_html_escape(job.get('posted', ''))}</span>
+      {_chip(job.get('source', ''), '#185FA5')} &nbsp;
+      {_flag_chip(job)}
+      <span style="font-size:11px;color:#aaa;margin-left:8px;">{_html_escape(_tidy_posted(job.get('posted', '')))}</span>
     </div>
   </td>
 </tr>"""
@@ -95,11 +135,19 @@ def _group_by_scope(jobs: List[Dict]) -> List[tuple]:
 
 def build_email_html(alerts: List[Dict], rest: List[Dict]) -> str:
     date_str = datetime.now().strftime("%a %d %b %Y, %H:%M")
-    total = len(alerts) + len(rest)
+    alerts, rest = dedupe_jobs(alerts), dedupe_jobs(rest)
+    by_score = lambda js: sorted(js, key=lambda j: -float(j.get("score", 0) or 0))
+    # Full-time roles first; internships/placements go in their own block at the end.
+    strong = by_score([j for j in alerts if not is_internship(j)])
+    interns = by_score([j for j in alerts + rest if is_internship(j)])
+    rest_ft = [j for j in rest if not is_internship(j)]
+    total = len(strong) + len(rest_ft) + len(interns)
 
-    body = _section_html("★ Strong matches — apply today", alerts, "#0d6e56")
-    for label, jobs in _group_by_scope(rest):
-        body += _section_html(label, jobs, "#185FA5")
+    body = _section_html("★ Strong matches — apply today", strong, "#0d6e56")
+    for label, jobs in _group_by_scope(rest_ft):
+        body += _section_html(label, by_score(jobs), "#185FA5")
+    body += _section_html("🎓 Internships / placements", interns, "#6b7280")
+    alerts = strong
 
     return f"""<!DOCTYPE html>
 <html><body style="margin:0;padding:0;background:#f7f7f8;
@@ -112,7 +160,7 @@ def build_email_html(alerts: List[Dict], rest: List[Dict]) -> str:
   <tr>
     <td style="background:linear-gradient(135deg,#0a66c2,#0d4f9e);
                 padding:24px 30px;color:#fff;">
-      <div style="font-size:20px;font-weight:700;">🇮🇪 Job Tracker v6</div>
+      <div style="font-size:20px;font-weight:700;">🇮🇪 Job Tracker v7</div>
       <div style="font-size:13px;opacity:.85;margin-top:4px;">
         {total} new job{"s" if total != 1 else ""} &nbsp;·&nbsp;
         {len(alerts)} strong match{"es" if len(alerts) != 1 else ""} &nbsp;·&nbsp;
@@ -135,7 +183,7 @@ def build_email_html(alerts: List[Dict], rest: List[Dict]) -> str:
 
 def send_email(alerts: List[Dict], rest: List[Dict]) -> bool:
     if not approved('email'):
-        print('  Delivery blocked: independent email approval missing')
+        print('  Delivery blocked: email disabled in config.yaml')
         return False
     sender = os.environ.get("EMAIL_SENDER", "")
     password = os.environ.get("EMAIL_PASSWORD", "")
@@ -171,7 +219,7 @@ def send_email(alerts: List[Dict], rest: List[Dict]) -> bool:
 
 def send_telegram(jobs: List[Dict], max_per_run: int = 10) -> bool:
     if not approved('telegram'):
-        print('  Delivery blocked: independent Telegram approval missing')
+        print('  Delivery blocked: telegram disabled in config.yaml')
         return False
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
     chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")

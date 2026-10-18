@@ -55,11 +55,11 @@ def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
     """
     out: List[Dict] = []
     seen = set()
-    page=0; end=time.monotonic()+45
+    page=0; offset=0; end=time.monotonic()+45
     while not pages or page < pages:
         if time.monotonic()>=end:
             partial("LinkedIn query time budget exhausted");break
-        url = _search_url(keyword, location, seconds, start=page * 25)
+        url = _search_url(keyword, location, seconds, start=offset)
         for attempt in range(2):
             try:
                 r = requests.get(url, headers=HEADERS, timeout=15)
@@ -81,6 +81,7 @@ def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
         soup = BeautifulSoup(r.text, "html.parser")
         cards = soup.find_all("div", class_="base-card")
         previous=len(seen)
+        offset += len(cards)
         for card in cards:
             try:
                 urn = card.get("data-entity-urn", "")
@@ -106,8 +107,11 @@ def fetch_linkedin(keyword: str, location: str = "Ireland", seconds: int = 7200,
                 })
             except (KeyError, AttributeError, ValueError):
                 continue
-        if len(cards) < 25 or len(seen)==previous:
+        # The guest endpoint returns ~10 cards per call, not 25. The old
+        # `len(cards) < 25` test therefore stopped every query after page 1.
+        if not cards or len(seen)==previous:
             break
+        time.sleep(random.uniform(1.0, 2.0))
         page+=1
     if pages and page>=pages:partial("Configured LinkedIn page limit reached")
     return out
@@ -148,7 +152,7 @@ def fetch_linkedin_sweep(
     seen_ids = set()
     print(f"  → LinkedIn: {len(searches)} searches, {window_hours}h lookback, "
           f"{'time-budgeted pagination' if not pages_per_search else str(pages_per_search)+' pages per query'}")
-    end=time.monotonic()+600
+    end=time.monotonic()+720
     for kw, loc in searches:
         if time.monotonic()>=end:
             tracked("LinkedIn:"+loc+":"+kw,lambda: (partial("Sweep time budget exhausted; query deferred"),[])[1])

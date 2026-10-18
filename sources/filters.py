@@ -28,7 +28,8 @@ from typing import Dict, List, Optional
 SENIOR_TITLE_PATTERNS = [
     re.compile(r"\bsenior\b", re.I),
     re.compile(r"\bsr\.?\s", re.I),
-    re.compile(r"\bstaff\s+(engineer|software|data|developer|scientist)", re.I),
+    re.compile(r"\bstaff\b(?!\s+(?:nurse|accountant))", re.I),
+    re.compile(r"\bteam\s+lead\b", re.I),
     re.compile(r"\bprincipal\b", re.I),
     re.compile(r"\bdirector\b", re.I),
     re.compile(r"\b(vp|vice president)\b", re.I),
@@ -63,6 +64,9 @@ ENTRY_LEVEL_PATTERNS = [
     re.compile(r"\blevel\s*[12]\b", re.I),
 ]
 
+STRONG_ENTRY_PATTERNS = ENTRY_LEVEL_PATTERNS[:12]   # graduate ... placement
+WEAK_ENTRY_PATTERNS = ENTRY_LEVEL_PATTERNS[12:]     # associate, I, II, level 1/2
+
 # Description-level experience demands, e.g. "5+ years of experience",
 # "minimum of 4 years' experience". Only fires near the word experience
 # so "founded 40 years ago" doesn't trigger it.
@@ -89,11 +93,16 @@ def seniority_of(title: str, description: str = "") -> str:
     rare, but "Junior to Senior" ranges exist) counts as entry — false
     positives are cheaper than false negatives for a job seeker.
     """
-    entry_title = any(p.search(title) for p in ENTRY_LEVEL_PATTERNS)
-    if entry_title:
+    # v7: "Senior Associate", "Staff ... Engineer" and "Team Lead" were slipping
+    # through as entry-level because the weak markers (associate, I/II, level 1/2)
+    # outranked an explicit senior marker. Strong markers (graduate, junior, intern,
+    # trainee...) still win; weak ones no longer override seniority.
+    if any(p.search(title) for p in STRONG_ENTRY_PATTERNS):
         return "entry"
     if any(p.search(title) for p in SENIOR_TITLE_PATTERNS):
         return "senior"
+    if any(p.search(title) for p in WEAK_ENTRY_PATTERNS):
+        return "entry"
     if description:
         if DESC_ENTRY_PATTERN.search(description):
             return "entry"
