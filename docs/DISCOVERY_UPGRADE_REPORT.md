@@ -104,3 +104,6 @@ Only record Applied/Assessment/Interview/etc. after the user confirms the actual
 Many configured employer endpoints are obsolete or inaccessible; those routes are not claimed as working. Several agency/general portals remain manual-only. Adzuna credentials are absent. Time budgets can yield partial coverage, and no source guarantees the entire market. Candidate work permission remains unconfirmed. Ranking is an evidence-based heuristic rather than an interview probability.
 
 **Next action:** user explicitly approves merging PR #2 after the final live scan passes. Then merge, verify state preservation and the active schedule, and narrow the existing ChatGPT automation to complementary coverage. No applications, CV changes or outreach are part of this work.
+
+
+> Note (v7): references above to signed grants and the ROLE allowlist are historical; both were removed in v7.
